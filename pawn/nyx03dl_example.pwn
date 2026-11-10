@@ -101,12 +101,46 @@ public OnFilterScriptInit()
     }
 
     print("[nyx03dl] Filterscript contoh Nyx03DL dimuat. /setskin [skinid] | /skins");
+
+    // v1.1.0 UI 2 detik: timer 1 detik yang menampilkan GameText
+    // "~g~Successfully downloaded" (2000 ms, style 3) di layar pemain
+    // begitu Nyx_HasClient() jadi true (artinya .asi-nya sudah kirim
+    // hello = download .dff/.txd sudah READY).
+    SetTimer("Nyx_UiTimer", 1000, true);
     return 1;
 }
 
 public OnFilterScriptExit()
 {
     print("[nyx03dl] Filterscript contoh Nyx03DL dimatikan.");
+    return 1;
+}
+
+// v1.1.0: 1x per pemain — GameText 2 detik saat download selesai.
+// >> KALAU DIINTEGRASIKAN KE GAMEMODE: pindahkan timer ini ke gamemode
+//    (SetTimer di OnGameModeInit) dan gabungkan OnPlayerDisconnect di
+//    bawah ke OnPlayerDisconnect gamemode Anda kalau sudah ada.
+new g_NyxUiShown[MAX_PLAYERS];
+
+forward Nyx_UiTimer();
+public Nyx_UiTimer()
+{
+    for (new i = 0; i < MAX_PLAYERS; i++)
+    {
+        if (g_NyxUiShown[i]) continue;
+        if (!IsPlayerConnected(i)) continue;
+        if (!Nyx_HasClient(i)) continue;
+        new gametext[] = "~g~Successfully downloaded";
+        GameTextForPlayer(i, gametext, 2000, 3);
+        g_NyxUiShown[i] = 1;
+    }
+    return 1;
+}
+
+public OnPlayerDisconnect(playerid, reason)
+{
+    #pragma unused reason
+    g_NyxUiShown[playerid] = 0;
     return 1;
 }
 
@@ -135,6 +169,16 @@ CMD:setskin(playerid, params[])
     if (skinid < NYX_MIN_SKINID || skinid > NYX_MAX_SKINID)
     {
         SendClientMessage(playerid, COLOR_MERAH, "Skin ID harus 20000-30000. Contoh: /setskin 20000");
+        return 1;
+    }
+
+    // v1.1.0: pemain harus pakai client .asi Nyx03DL (dan download-nya
+    // sudah READY) — kalau tidak, skin custom tidak akan tampil di
+    // layarnya, jadi tolak saja daripada diam-diam kasih skin base.
+    if (!Nyx_HasClient(playerid))
+    {
+        SendClientMessage(playerid, COLOR_MERAH, "Kamu belum pakai nyx03dl.asi / download belum selesai.");
+        SendClientMessage(playerid, COLOR_MERAH, "Pasang nyx03dl.asi di folder GTA SA, reconnect, tunggu download selesai, baru /setskin lagi.");
         return 1;
     }
 

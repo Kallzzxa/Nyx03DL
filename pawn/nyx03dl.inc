@@ -105,3 +105,28 @@ native Nyx_SetPlayerSkin(playerid, skinid);
 //       printf("Skin 20000 memakai base ped %d.", baseid);
 //   }
 native Nyx_GetBaseSkin(skinid);
+
+// Cek apakah pemain ini memakai client .asi Nyx03DL (v1.1.0).
+//
+//   playerid : ID pemain.
+//
+// Return : 1 kalau .asi pemain itu sudah kirim GET /nyx03dl/hello
+//          dalam 60 detik terakhir (artinya .asi terpasang, connect
+//          ke server ini, DAN download .dff/.txd-nya sudah READY),
+//          0 kalau tidak.
+//
+// PENTING: pakai native ini di /setskin SEBELUM Nyx_SetPlayerSkin —
+// pemain tanpa .asi (atau yang download-nya belum selesai) harus
+// ditolak dengan pesan yang jelas, bukan diam-diam dikasih skin base.
+// Cara kerja: .asi mengumumkan diri lewat HTTP, server mencocokkan
+// IP TCP-nya dengan GetPlayerIp(playerid). Keterbatasan: pemain yang
+// berbagi satu IP publik/NAT (warnet / VPN yang sama) berbagi satu
+// entri presence — kalau satu dari mereka pakai .asi, semuanya
+// terlihat pakai .asi.
+//
+// Contoh:
+//   if (!Nyx_HasClient(playerid))
+//   {
+//       SendClientMessage(playerid, -1, "Pasang nyx03dl.asi dulu, reconnect, tunggu download selesai.");
+//   }
+native Nyx_HasClient(playerid);

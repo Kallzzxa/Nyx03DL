@@ -18,6 +18,7 @@
 #include "monitor.h"
 
 #include "cache.h"
+#include "chatui.h"
 #include "download.h"
 #include "http.h"
 #include "log.h"
@@ -81,6 +82,21 @@ std::string FileUrl(const std::string& ip, uint16_t httpPort, const std::string&
 
 std::string PlayersUrl(const std::string& ip, uint16_t httpPort) {
     return "http://" + ip + ":" + std::to_string(httpPort) + "/nyx03dl/players";
+}
+
+std::string HelloUrl(const std::string& ip, uint16_t httpPort) {
+    return "http://" + ip + ":" + std::to_string(httpPort) + "/nyx03dl/hello";
+}
+
+// v1.1.0: announce "this client has nyx03dl and its downloads are
+// READY" to the server (GET /nyx03dl/hello). The server records the TCP
+// peer IP; Nyx_HasClient(playerid) matches it against GetPlayerIp.
+// Sent only while READY — a client still downloading must NOT look
+// present, or /setskin would be allowed before the skin can render.
+bool SendHello(const rak::ServerAddress& srv, uint16_t httpPort) {
+    long status = 0;
+    std::string body;
+    return http::Get(HelloUrl(srv.ip, httpPort), 3000, status, body);
 }
 
 // Poll GET /nyx03dl/players once (M3). On success the mapping is stored
@@ -191,9 +207,17 @@ State DoProbe(const rak::ServerAddress& srv) {
 
     if (enqueued == 0) {
         NYX_LOGI("all %zu model(s) already cached and verified -> READY", models.size());
+        // v1.1.0 UI: show the ready line in-game (chat, game thread drains it).
+        chatui::Enqueue(chatui::kColorOk,
+                        "[Nyx03DL] Custom skins ready (" +
+                            std::to_string(models.size()) + " skin(s) from cache)");
         return State::READY;
     }
     NYX_LOGI("enqueued %d file(s) for download", enqueued);
+    // v1.1.0 UI: show the downloading line in-game as soon as we start.
+    chatui::Enqueue(chatui::kColorInfo,
+                    "[Nyx03DL] Downloading custom skins... (" +
+                        std::to_string(enqueued) + " file(s))");
     return State::DOWNLOADING;
 }
 
@@ -207,6 +231,9 @@ void MonitorLoop() {
     // /players polling (M3): due immediately once on a Nyx server.
     Clock::time_point lastPlayersPoll = Clock::now() - std::chrono::hours(1);
     bool playersOk = true;  // last poll outcome (for transition-only logging)
+    // v1.1.0 hello (presence): due immediately once READY.
+    Clock::time_point lastHello = Clock::now() - std::chrono::hours(1);
+    bool helloOk = false;
 
     NYX_LOGI("monitor: started (poll %d ms, probe retry %d ms)", kPollMs, kProbeRetryMs);
 
@@ -281,6 +308,15 @@ void MonitorLoop() {
                          r.ok ? "done" : "FAILED", r.skinid,
                          r.isDff ? "dff" : "txd", r.crc);
                 GlobalState().MarkDownloaded(r.skinid, r.isDff, r.ok);
+                // v1.1.0 UI: surface a failed download in-game instead of
+                // failing silently (skin would just stay base).
+                if (!r.ok) {
+                    chatui::Enqueue(chatui::kColorError,
+                                    "[Nyx03DL] Download failed for skin " +
+                                        std::to_string(r.skinid) +
+                                        " (" + (r.isDff ? "dff" : "txd") +
+                                        "), will retry next connect.");
+                }
             }
             if (!done.empty()) {
                 GlobalState().UpdateFromCache();
@@ -289,6 +325,29 @@ void MonitorLoop() {
                              "(server %s)",
                              GlobalState().ServerKey().c_str());
                     state = State::READY;
+                    lastHello = Clock::now() - std::chrono::hours(1);  // hello at once
+                    helloOk = false;
+                    // v1.1.0 UI: the success line the user asked for.
+                    chatui::Enqueue(chatui::kColorOk,
+                                    "[Nyx03DL] Successfully downloaded " +
+                                        std::to_string(GlobalState().Models().size()) +
+                                        " custom skin(s)!");
+                }
+            }
+
+            // v1.1.0: while READY, announce presence every ~10 s so the
+            // server's Nyx_HasClient() stays true (TTL 60 s server-side).
+            if (state == State::READY) {
+                auto nowHello = Clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(nowHello - lastHello)
+                        .count() >= 10000) {
+                    lastHello = nowHello;
+                    bool ok = SendHello(srv, GlobalState().HttpPort());
+                    if (ok && !helloOk) {
+                        NYX_LOGI("hello: server now knows this client has nyx03dl "
+                                 "(downloads ready)");
+                    }
+                    helloOk = ok;
                 }
             }
 

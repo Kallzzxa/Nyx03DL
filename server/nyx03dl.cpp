@@ -29,6 +29,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <map>
+#include <mutex>
 #include <set>
 #include <atomic>
 #include <thread>
@@ -81,6 +83,36 @@ static void readConfig() {
 
 static nyx::Registry g_registry;
 static std::set<int> g_seen_players;  // playerids with a skin mapping
+
+// ------------------------------------------------------- .asi presence --
+// v1.1.0: the client .asi announces itself with GET /nyx03dl/hello once
+// its downloads are READY (see client monitor.cpp). The HTTP thread
+// records the TCP peer IP + time; Nyx_HasClient(playerid) checks whether
+// the player's IP (GetPlayerIp) has announced recently (TTL 60 s).
+// IP-based on purpose: the .asi has no reliable way to learn its own
+// SA-MP playerid (0-999), and the plugin has no RakNet access to send
+// it one. Limitation: players sharing one public IP/NAT (same warnet /
+// same VPN exit) share one presence entry — if one of them has the .asi,
+// all of them look present. Acceptable for a gate, not for identity.
+static std::map<std::string, std::chrono::steady_clock::time_point> g_asi_seen;
+static std::mutex g_asi_mutex;
+static const int kAsiSeenTtlSec = 60;
+
+static void asi_note(const std::string &ip) {
+    if (ip.empty()) return;
+    std::lock_guard<std::mutex> lock(g_asi_mutex);
+    g_asi_seen[ip] = std::chrono::steady_clock::now();
+}
+
+static bool asi_seen_recent(const std::string &ip) {
+    std::lock_guard<std::mutex> lock(g_asi_mutex);
+    std::map<std::string, std::chrono::steady_clock::time_point>::iterator it =
+        g_asi_seen.find(ip);
+    if (it == g_asi_seen.end()) return false;
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::steady_clock::now() - it->second)
+               .count() < kAsiSeenTtlSec;
+}
 
 // ------------------------------------------------------------- AMX util --
 
@@ -169,10 +201,27 @@ static cell AMX_NATIVE_CALL n_Nyx_GetBaseSkin(AMX *amx, const cell *params) {
     return g_registry.get_base_skin((int)params[1]);
 }
 
+// native Nyx_HasClient(playerid) — v1.1.0. 1 when this player's IP has
+// sent GET /nyx03dl/hello in the last 60 s (i.e. the .asi is installed,
+// connected to this server, AND its downloads are READY), else 0.
+// Use it in /setskin to refuse players without the .asi instead of
+// silently showing them the base ped.
+static cell AMX_NATIVE_CALL n_Nyx_HasClient(AMX *amx, const cell *params) {
+    (void)amx;
+    if (params[0] < 1 * (cell)sizeof(cell)) return 0;
+    int playerid = (int)params[1];
+    if (playerid < 0 || playerid >= nyx::kMaxPlayers) return 0;
+    if (!IsPlayerConnected(playerid)) return 0;
+    char ip[64] = {0};
+    if (!GetPlayerIp(playerid, ip, sizeof(ip))) return 0;
+    return asi_seen_recent(ip) ? 1 : 0;
+}
+
 static AMX_NATIVE_INFO g_natives[] = {
     {"SetCostumNyx03DL", n_SetCostumNyx03DL},
     {"Nyx_SetPlayerSkin", n_Nyx_SetPlayerSkin},
     {"Nyx_GetBaseSkin", n_Nyx_GetBaseSkin},
+    {"Nyx_HasClient", n_Nyx_HasClient},
     {nullptr, nullptr},
 };
 
@@ -211,6 +260,17 @@ static bool send_response(SOCKET s, int code, const char *reason,
 // Handles one accepted HTTP connection (HTTP/1.0, connection closed
 // after the response). Logs only errors — no per-request spam.
 static void handle_http_client(SOCKET client) {
+    // v1.1.0: peer IP for the /nyx03dl/hello presence endpoint.
+    std::string peerIp;
+    {
+        sockaddr_in peerAddr;
+        int peerLen = sizeof(peerAddr);
+        if (getpeername(client, (sockaddr *)&peerAddr, &peerLen) == 0) {
+            char buf[64] = {0};
+            if (inet_ntop(AF_INET, &peerAddr.sin_addr, buf, sizeof(buf)))
+                peerIp = buf;
+        }
+    }
     std::string req;
     char buf[4096];
     while (req.size() < 8192) {
@@ -244,6 +304,13 @@ static void handle_http_client(SOCKET client) {
     if (path == "/nyx03dl/manifest") {
         send_response(client, 200, "OK", "application/json",
                       nyx::build_manifest_json(g_registry.snapshot_skins()));
+        return;
+    }
+    if (path == "/nyx03dl/hello") {
+        // v1.1.0: .asi presence announcement (READY = downloads done).
+        // No body needed; the peer IP is the identity.
+        asi_note(peerIp);
+        send_response(client, 200, "OK", "text/plain", "ok");
         return;
     }
     if (path == "/nyx03dl/players") {

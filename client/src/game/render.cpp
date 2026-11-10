@@ -21,6 +21,7 @@
 
 #include "game/gta.h"
 #include "game/rwmodel.h"
+#include "chatui.h"
 #include "log.h"
 #include "nyx_state.h"
 #include "samp.h"
@@ -177,6 +178,10 @@ bool EnsureSwapForCustom(int skinid) {
 
 void Tick() {
     g_frame++;
+
+    // v1.1.0: show queued download-status lines in the SA-MP chat
+    // (game thread — the only thread allowed to call CChat::AddMessage).
+    chatui::Drain();
 
     // Disconnect / server change requested a restore (flag set by the
     // monitor thread — the restore itself runs here, on the game thread).

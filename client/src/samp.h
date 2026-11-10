@@ -27,6 +27,11 @@ constexpr uint32_t kTimeDateStamp = 0x6372C39E;
 constexpr uintptr_t kCNetGame_GetRakClient = 0xBBC0;  // -> RakClientInterface*
 constexpr uintptr_t kCNetGame_Process = 0xB5B0;       // per-frame; M3 main-thread tick
 
+// CChat (thiscall) — v1.1.0 download-status UI (chatui.*). Same RVAs
+// the reference repo uses for its DebugChat.
+constexpr uintptr_t kRefChat = 0x26EB80;         // CChat**
+constexpr uintptr_t kCChat_AddMessage = 0x68170;  // (this, D3DCOLOR color, const char* text)
+
 // ScrSetPlayerSkin(RPCParameters*), __cdecl. M3 hooks it ONLY as a
 // pre-swap trigger (see skinhook.*): the 0.3.7 wire packet
 // (u32 PlayerID, u32 skin = 64 bits) is NEVER rewritten.
