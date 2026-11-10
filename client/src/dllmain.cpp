@@ -71,9 +71,13 @@ DWORD WINAPI MonitorThread(LPVOID) {
     else
         NYX_LOGW("M3 renderer OFF (hook install failed); downloads continue, "
                  "skins will not be applied");
-    if (skinhook::Init())
-        NYX_LOGI("M3 skin-change hook on (ScrSetPlayerSkin pre-swap)");
-    else
+    if (skinhook::Init()) {
+        if (skinhook::IsActive())
+            NYX_LOGI("M3 skin-change hook on (ScrSetPlayerSkin pre-swap)");
+        else
+            NYX_LOGI("M3 skin-change hook off on this build (no verified hook "
+                     "address); skins apply via per-frame Tick");
+    } else
         NYX_LOGW("M3 skin-change hook OFF; skins still apply via per-frame Tick");
 
     NYX_LOGI("monitor starting (polling + M3 hooks)");

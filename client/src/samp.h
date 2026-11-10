@@ -33,6 +33,13 @@ namespace samp {
 // One RVA table per supported samp.dll build. netGameProcess is the
 // per-frame hook target (R5: CNetGame::Process; R1: CNetGame::UpdateNetwork).
 // scrSetPlayerSkin == 0 means "no hook on this build" (see header note).
+// hostAddressOff / serverPortOff are CNetGame field offsets (packed
+// struct, SAMP-API headers) used to read the server address WITHOUT
+// calling RakClient::GetServerID — v1.2.0 crashed on R1 right after
+// connect, in the monitor poll, with the log stopping before "connected
+// to" (i.e. inside GetServerAddress, the only vtable call there whose
+// slot was never verified on R1). Field reads cannot call the wrong
+// function; the offsets are verified below in samp.cpp.
 struct VersionAddrs {
     const char* name;
     const char* tickName;
@@ -44,6 +51,8 @@ struct VersionAddrs {
     uintptr_t scrSetPlayerSkin; // (RPCParameters*), __cdecl; 0 = none
     uintptr_t refChat;          // CChat**
     uintptr_t chatAddMessage;   // (this, D3DCOLOR color, const char* text)
+    uintptr_t hostAddressOff;   // CNetGame::m_szHostAddress (char[257])
+    uintptr_t serverPortOff;    // CNetGame::m_nPort (int, packed)
 };
 
 namespace versions {

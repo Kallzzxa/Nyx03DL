@@ -259,8 +259,13 @@ void MonitorLoop() {
             continue;
         }
 
+        // v1.2.1: the server address comes from CNetGame fields now (no
+        // vtable call). Log BEFORE reading it, so a future crash here is
+        // pinpointed instead of looking like a silent stop.
+        if (!wasConnected)
+            NYX_LOGI("connected; reading server address from CNetGame fields...");
         rak::ServerAddress srv;
-        if (!rak::GetServerAddress(rak, srv)) {
+        if (!rak::GetServerAddress(rak::NetGame(), srv)) {
             // Connected but the server address is not readable yet; keep
             // polling — never a reason to crash or to probe blindly.
             continue;

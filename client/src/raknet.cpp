@@ -3,65 +3,16 @@
 // Written for Nyx03DL (M2), from reference/customskin-0.3.7-R5
 // vendor/raknet/rakclient.h + src/net/raknet.cpp (GPL-3.0).
 //
-// VTABLE SLOT COUNT (MSVC layout, destructor = slot 0, then the virtuals
-// in declaration order exactly as written in vendor/raknet/rakclient.h):
-//   0  ~RakClientInterface (destructor — MSVC emits ONE destructor slot)
-//   1  Connect
-//   2  Disconnect
-//   3  InitializeSecurity
-//   4  SetPassword
-//   5  HasPassword
-//   6  Send(const char*, ...)
-//   7  Send(BitStream*, ...)
-//   8  Receive
-//   9  DeallocatePacket
-//   10 PingServer()
-//   11 PingServer(host, ...)
-//   12 GetAveragePing
-//   13 GetLastPing
-//   14 GetLowestPing
-//   15 GetPlayerPing
-//   16 StartOccasionalPing
-//   17 StopOccasionalPing
-//   18 IsConnected            <-- used
-//   19 GetSynchronizedRandomInteger
-//   20 GenerateCompressionLayer
-//   21 DeleteCompressionLayer
-//   22 RegisterAsRemoteProcedureCall
-//   23 RegisterClassMemberRPC
-//   24 UnregisterAsRemoteProcedureCall
-//   25 RPC(const char*, ...)
-//   26 RPC(BitStream*, ...)
-//   27 RPC_
-//   28 SetTrackFrequencyTable
-//   29 GetSendFrequencyTable
-//   30 GetCompressionRatio
-//   31 GetDecompressionRatio
-//   32 AttachPlugin
-//   33 DetachPlugin
-//   34 GetStaticServerData
-//   35 SetStaticServerData
-//   36 GetStaticClientData
-//   37 SetStaticClientData
-//   38 SendStaticClientDataToServer
-//   39 GetServerID            <-- used
-//   40 GetPlayerID
-//   41 GetInternalID
-//   42 PlayerIDToDottedIP
-//   ... (later slots unused by M2)
-//
-// BYTE-ORDER ASSUMPTIONS (see README for the full discussion):
-//  * PlayerID.binaryAddress is in NETWORK byte order (it comes from
-//    inet_addr / the wire), so it can be handed to inet_ntoa() as-is.
-//  * PlayerID.port is in HOST byte order (RakNet stores the port
-//    host-order in PlayerID; SA-MP itself prints GetServerID().port
-//    directly as the server port). If this assumption were wrong, the
-//    manifest probe would simply fail and the monitor would SLEEP —
-//    never a crash — and the log would show the wrong port.
-//  * PlayerID is #pragma pack(1) in rakclient.h: 4-byte binaryAddress +
-//    2-byte port = 6 bytes. MSVC returns a <=8-byte struct in EAX:EDX,
-//    so GetServerID is called here as returning uint64_t and the low
-//    48 bits are decoded; the top 16 bits are ignored.
+// VTABLE SLOT (MSVC layout, destructor = slot 0, then the virtuals in
+// declaration order exactly as written in vendor/raknet/rakclient.h).
+// Only IsConnected is called through the vtable now (slot 18). The
+// GetServerID call (former slot 39) was REMOVED in v1.2.1: on 0.3.7-R1
+// it crashed the game right after connect, with the log stopping before
+// "connected to" and the fault landing in ntdll. The server address
+// now comes from CNetGame's own fields (see GetServerAddress below),
+// which are plain memory reads — they cannot dispatch to a wrong
+// function. The field offsets are per-build (samp.h) and verified
+// against SAMP-API's packed CNetGame layouts + SAMP-UDF's tables.
 #include "raknet.h"
 
 #include "samp.h"
@@ -77,32 +28,48 @@ namespace nyx {
 namespace rak {
 namespace {
 
-// Vtable slots (counted from vendor/raknet/rakclient.h, see header comment).
+// VTABLE SLOT (counted from vendor/raknet/rakclient.h, see header comment).
+// Only IsConnected is still called through the vtable (v1.2.1 removed the
+// GetServerID call — see raknet.h). Slot 18 survived many menu polls on
+// R1 before the v1.2.0 crash, which happened later in GetServerAddress.
 constexpr size_t kVtIsConnected = 18;
-constexpr size_t kVtGetServerID = 39;
 
 #ifdef _WIN32
 using GetRakClientFn = void*(__thiscall*)(void*);  // CNetGame::GetRakClient()
 using IsConnectedFn = bool(__thiscall*)(void*);     // RakClient::IsConnected()
-using GetServerIDFn = uint64_t(__thiscall*)(void*); // RakClient::GetServerID()
 
 void* VTableFn(void* rakClient, size_t slot) {
     if (!rakClient) return nullptr;
     void** vtable = *reinterpret_cast<void***>(rakClient);
     if (!vtable) return nullptr;
-    return vtable[slot];
+    // Defensive: the slot must point inside samp.dll's image. A garbage
+    // RakClient pointer (or a wrong vtable) must never dispatch anywhere.
+    uintptr_t fn = reinterpret_cast<uintptr_t>(vtable[slot]);
+    uintptr_t base = samp::Base();
+    if (fn < base || fn >= base + samp::ImageSize()) return nullptr;
+    return reinterpret_cast<void*>(fn);
 }
 #endif
 
 }  // namespace
 
-void* ResolveRakClient() {
+void* NetGame() {
 #ifdef _WIN32
     if (!samp::Base()) return nullptr;
     const auto* ver = nyx::samp::ActiveVersion();
     if (!ver) return nullptr;
-    void* netgame = *reinterpret_cast<void**>(samp::Addr(ver->refNetGame));
+    return *reinterpret_cast<void**>(samp::Addr(ver->refNetGame));
+#else
+    return nullptr;  // no samp.dll on Linux (unit harness)
+#endif
+}
+
+void* ResolveRakClient() {
+#ifdef _WIN32
+    void* netgame = NetGame();
     if (!netgame) return nullptr;
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver) return nullptr;
     auto fn = reinterpret_cast<GetRakClientFn>(samp::Addr(ver->getRakClient));
     return fn(netgame);
 #else
@@ -121,27 +88,52 @@ bool IsConnected(void* rakClient) {
 #endif
 }
 
-bool GetServerAddress(void* rakClient, ServerAddress& out) {
+bool GetServerAddress(void* netGame, ServerAddress& out) {
     out = ServerAddress{};
 #ifdef _WIN32
-    auto fn = reinterpret_cast<GetServerIDFn>(VTableFn(rakClient, kVtGetServerID));
-    if (!fn) return false;
-    uint64_t raw = fn(rakClient);
-    // Low 32 bits: binaryAddress (network byte order). Bits 32..47: port
-    // (host byte order, see header comment). Bits 48..63: padding, ignored.
-    uint32_t binaryAddress = static_cast<uint32_t>(raw & 0xFFFFFFFFull);
-    uint16_t port = static_cast<uint16_t>((raw >> 32) & 0xFFFFu);
-    if (binaryAddress == 0 || binaryAddress == 0xFFFFFFFFu || port == 0) return false;
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver || !netGame) return false;
+    // m_szHostAddress: the address string the user connected to (dotted
+    // IP or hostname, up to 256 chars + NUL). Read defensively: the
+    // pointer comes from samp.dll, so copy byte-by-byte with a cap.
+    const char* hostRaw =
+        reinterpret_cast<const char*>(netGame) + ver->hostAddressOff;
+    char host[257];
+    size_t n = 0;
+    while (n < sizeof(host) - 1 && hostRaw[n] != '\0') {
+        char c = hostRaw[n];
+        if (c < 0x20 || c > 0x7E) return false;  // not plausible text
+        host[n++] = c;
+    }
+    host[n] = '\0';
+    if (n == 0) return false;
+    // m_nPort: int at the packed offset (x86 tolerates the unaligned read).
+    int port = *reinterpret_cast<const int*>(reinterpret_cast<const char*>(netGame) +
+                                             ver->serverPortOff);
+    if (port <= 0 || port > 65535) return false;
+    // Resolve the host (works for a dotted IP and for a hostname).
+    WSADATA wsa;
+    static bool wsaOk = (WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
+    if (!wsaOk) return false;
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    if (getaddrinfo(host, nullptr, &hints, &res) != 0 || !res) return false;
+    auto* sin = reinterpret_cast<sockaddr_in*>(res->ai_addr);
+    uint32_t binaryAddress = sin->sin_addr.s_addr;  // network byte order
+    freeaddrinfo(res);
+    if (binaryAddress == 0 || binaryAddress == 0xFFFFFFFFu) return false;
     in_addr addr;
-    addr.s_addr = binaryAddress;  // already network byte order
+    addr.s_addr = binaryAddress;
     const char* dotted = inet_ntoa(addr);
     if (!dotted) return false;
     out.ip = dotted;
-    out.gamePort = port;
+    out.gamePort = static_cast<uint16_t>(port);
     out.valid = true;
     return true;
 #else
-    (void)rakClient;
+    (void)netGame;
     return false;
 #endif
 }

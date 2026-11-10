@@ -22,6 +22,10 @@ namespace versions {
 // (CNetGame.cpp: Process 0xB5B0, GetRakClient 0xBBC0, RefNetGame
 // 0x26EB94; RPCHandlers.cpp: ScrSetPlayerSkin 0x19190; CChat.cpp:
 // AddMessage 0x68170, RefChat 0x26EB80).
+// CNetGame fields (SAMP-API R5-1 CNetGame.h, pack(1)): m_pRakClient at 0,
+// pad_0[44] -> m_szHostAddress at 48 (0x30), m_szHostname at 305,
+// 3 bools -> m_nPort at 565 (0x235). The port offset agrees with
+// SAMP-UDF's 0.3DL value (0x235), whose CNetGame shares this layout.
 const VersionAddrs kR5_1 = {
     "0.3.7-R5-1", "CNetGame::Process",
     0x0027E000, 0x6372C39E,
@@ -31,6 +35,8 @@ const VersionAddrs kR5_1 = {
     0x19190,   // scrSetPlayerSkin
     0x26EB80,  // refChat
     0x68170,   // chatAddMessage
+    0x30,      // hostAddressOff (m_szHostAddress)
+    0x235,     // serverPortOff (m_nPort)
 };
 
 // R1: from SAMP-API multiver, sampapi/0.3.7-R1 — CNetGame.cpp
@@ -38,6 +44,12 @@ const VersionAddrs kR5_1 = {
 // CChat.cpp (RefChat 0x21A0E4, AddMessage 0x645A0). Chat pointer
 // cross-checked vs SAMP-UDF (ADDR_SAMP_CHATMSG_PTR[0] = 0x21A0E4).
 // Fingerprint from a real user's samp.dll (log 2026-11-10).
+// CNetGame fields (SAMP-API R1 CNetGame.h, pack(1)): pad_0[32] ->
+// m_szHostAddress at 32 (0x20), m_szHostname at 289, 3 bools ->
+// m_nPort at 549 (0x225); m_pRakClient at 969 (0x3C9) — the last one is
+// confirmed by the actual GetRakClient bytes in the user's log
+// (8B 81 C9 03 00 00 C3 = mov eax,[ecx+0x3C9]; ret). Host/port offsets
+// agree with SAMP-UDF (SERVERIP 0x20, SERVERPORT 0x225 for R1).
 // scrSetPlayerSkin == 0: no public R1 address found, NOT guessed.
 const VersionAddrs kR1 = {
     "0.3.7-R1", "CNetGame::UpdateNetwork",
@@ -48,6 +60,8 @@ const VersionAddrs kR1 = {
     0,         // scrSetPlayerSkin (unknown on R1 — no hook)
     0x21A0E4,  // refChat
     0x645A0,   // chatAddMessage
+    0x20,      // hostAddressOff (m_szHostAddress)
+    0x225,     // serverPortOff (m_nPort)
 };
 
 }  // namespace versions
