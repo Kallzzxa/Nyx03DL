@@ -1,0 +1,11 @@
+TARUH FILE .dff/.txd ASLI ANDA DI FOLDER INI.
+
+Satu skin = 1 pasang file (.dff + .txd), misal:
+  skin1.dff
+  skin1.txd
+
+Nama file harus persis sama dengan yang didaftarkan di Pawn
+(SetCostumNyx03DL) — case-sensitive di Linux.
+
+Folder ini sengaja TIDAK berisi model apa pun. File contoh
+"skin1.dff" / "skin2.dff" di nyx03dl_example.pwn hanyalah nama.

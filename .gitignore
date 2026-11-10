@@ -1,0 +1,8 @@
+out/
+*.pdb
+*.lib
+*.dll
+*.asi
+*.amx
+*.o
+*.obj

@@ -1,0 +1,42 @@
+# =====================================================================
+# server.cfg.example — CONTOH — sesuaikan dengan server.cfg Anda.
+#
+# File ini HANYA contoh. JANGAN timpa server.cfg asli Anda dengan
+# file ini. Ambil baris yang perlu saja dan sesuaikan dengan
+# server.cfg yang sudah ada:
+#   - "plugins": TAMBAHKAN nyx03dl ke daftar plugins yang sudah ada,
+#     JANGAN timpa baris plugins Anda (plugin lain tetap dibutuhkan).
+#   - "filterscripts": tambahkan nyx03dl_example kalau Anda memakai
+#     filterscript contoh (opsional kalau /setskin sudah dipindah
+#     langsung ke gamemode).
+#   - "nyx03dl.cfg" (config plugin: port HTTP + base pool) harus ada
+#     di sebelah samp-server.exe — lihat ../server/nyx03dl.cfg.
+# =====================================================================
+
+echo Executing Server Config...
+
+lanmode 0
+rcon_password UBAH_PASSWORD_INI
+maxplayers 50
+port 7777
+hostname CONTOH - Server SA-MP + Nyx03DL
+gamemode0 grandlarc 1
+filterscripts nyx03dl_example
+announce 0
+query 1
+weburl www.sa-mp.com
+onfoot_rate 40
+incar_rate 40
+weapon_rate 40
+stream_distance 300.0
+stream_rate 1000
+maxnpc 0
+logtimeformat [%H:%M:%S]
+language English
+
+# Plugin: tambahkan nyx03dl ke daftar yang SUDAH ADA.
+# Contoh kalau sebelumnya: plugins streamer sscanf
+# menjadi:
+plugins streamer sscanf nyx03dl
+# (Di Windows, nama plugin ditulis tanpa ".dll".
+#  Kalau Anda tidak memakai streamer/sscanf, tulis saja: plugins nyx03dl)
