@@ -20,7 +20,7 @@
 //
 // Both are UNVERIFIED at runtime (no Windows/GTA in this VM) — if the
 // count is off by one, IsConnected() will read the wrong function and the
-// monitor will misbehave. The R5 fingerprint gate + the log lines in the
+// monitor will misbehave. The build fingerprint gate + the log lines in the
 // monitor are the safety net: a wrong slot shows up immediately as
 // "connected" flapping or a crash-free but useless probe loop, never as
 // a write to game memory (M2 only ever READS through these calls).
@@ -41,7 +41,7 @@ struct ServerAddress {
     std::string Key() const { return ip + ":" + std::to_string(gamePort); }
 };
 
-// Resolve the live RakClientInterface* via CNetGame (R5 RVA table).
+// Resolve the live RakClientInterface* via CNetGame (per-build RVA table).
 // Returns nullptr when no CNetGame exists yet (not connected / menu).
 // This only READS samp.dll memory; it installs no hook.
 void* ResolveRakClient();

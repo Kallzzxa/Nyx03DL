@@ -23,7 +23,7 @@
 namespace render {
 
 // Install the per-frame tick (hook CNetGame::Process). Guarded by
-// samp::IsR5Build(); idempotent — a second call is a no-op. False if
+// samp::IsSupportedBuild(); idempotent — a second call is a no-op. False if
 // the hook could not be installed (M3 stays off, M2 keeps working).
 bool Init();
 

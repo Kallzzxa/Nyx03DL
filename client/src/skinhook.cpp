@@ -64,16 +64,27 @@ void __cdecl Hooked_ScrSetPlayerSkin(RPCParameters* p) {
 
 bool Init() {
     if (g_installed) return true;
-    if (!nyx::samp::IsR5Build()) {
-        NYX_LOGE("skinhook: not R5 build; skipping");
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver) {
+        NYX_LOGE("skinhook: no supported samp.dll build; skipping");
         return false;
     }
-    g_skinHook.install(nyx::samp::Addr(nyx::samp::r5::kScrSetPlayerSkin),
+    if (!ver->scrSetPlayerSkin) {
+        // v1.2.0 (R1): no verified ScrSetPlayerSkin address exists, so
+        // the hook is skipped instead of guessed. Skins still apply via
+        // the per-frame Tick swap — the custom shows on the NEXT
+        // /setskin after the swap, so repeat the command once.
+        NYX_LOGW("skinhook: no ScrSetPlayerSkin hook on %s; skins apply via "
+                 "per-frame Tick (repeat /setskin once after the swap)",
+                 ver->name);
+        return true;  // soft-skip, not a failure
+    }
+    g_skinHook.install(nyx::samp::Addr(ver->scrSetPlayerSkin),
                        urmem::get_func_addr(&Hooked_ScrSetPlayerSkin),
                        urmem::hook::type::jmp);
     g_installed = true;
     NYX_LOGI("skinhook: hooked ScrSetPlayerSkin @ 0x%08X",
-             static_cast<unsigned>(nyx::samp::Addr(nyx::samp::r5::kScrSetPlayerSkin)));
+             static_cast<unsigned>(nyx::samp::Addr(ver->scrSetPlayerSkin)));
     return true;
 }
 

@@ -17,7 +17,8 @@
 
 namespace skinhook {
 
-// Install the ScrSetPlayerSkin hook. Guarded by samp::IsR5Build();
+// Install the ScrSetPlayerSkin hook. Guarded by samp::ActiveVersion()
+// (no-op on builds without a verified hook address, e.g. 0.3.7-R1);
 // idempotent — a second call is a no-op. False if the hook could not
 // be installed (M3 skin-change pre-swap stays off; the per-frame Tick
 // still applies skins, M2 keeps working).

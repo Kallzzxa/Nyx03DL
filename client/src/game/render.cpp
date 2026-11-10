@@ -218,16 +218,18 @@ void Tick() {
 
 bool Init() {
     if (g_installed) return true;
-    if (!nyx::samp::IsR5Build()) {
-        NYX_LOGE("render: not R5 build; skipping");
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver) {
+        NYX_LOGE("render: no supported samp.dll build; skipping");
         return false;
     }
-    g_processHook.install(nyx::samp::Addr(nyx::samp::r5::kCNetGame_Process),
+    g_processHook.install(nyx::samp::Addr(ver->netGameProcess),
                           urmem::get_func_addr(&Hooked_Process),
                           urmem::hook::type::jmp);
     g_installed = true;
-    NYX_LOGI("render: hooked CNetGame::Process @ 0x%08X (per-frame tick)",
-             static_cast<unsigned>(nyx::samp::Addr(nyx::samp::r5::kCNetGame_Process)));
+    NYX_LOGI("render: hooked %s @ 0x%08X (per-frame tick)",
+             ver->tickName,
+             static_cast<unsigned>(nyx::samp::Addr(ver->netGameProcess)));
     return true;
 }
 

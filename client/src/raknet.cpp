@@ -99,9 +99,11 @@ void* VTableFn(void* rakClient, size_t slot) {
 void* ResolveRakClient() {
 #ifdef _WIN32
     if (!samp::Base()) return nullptr;
-    void* netgame = *reinterpret_cast<void**>(samp::Addr(samp::r5::kRefNetGame));
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver) return nullptr;
+    void* netgame = *reinterpret_cast<void**>(samp::Addr(ver->refNetGame));
     if (!netgame) return nullptr;
-    auto fn = reinterpret_cast<GetRakClientFn>(samp::Addr(samp::r5::kCNetGame_GetRakClient));
+    auto fn = reinterpret_cast<GetRakClientFn>(samp::Addr(ver->getRakClient));
     return fn(netgame);
 #else
     return nullptr;  // no samp.dll on Linux (unit harness)

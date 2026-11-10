@@ -15,7 +15,7 @@ namespace nyx {
 
 // Runs forever (until the process exits). Called once from the monitor
 // thread created in DllMain, after samp.dll has been resolved and the
-// R5 fingerprint has been verified.
+// The samp.dll build fingerprint has been verified.
 void MonitorLoop();
 
 }  // namespace nyx

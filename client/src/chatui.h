@@ -11,7 +11,7 @@
 //
 // Why chat, not a custom HUD: a custom on-screen banner would need
 // unverified GTA font/draw addresses; CChat is the one text path the
-// reference already proved on this exact R5 build. The "2 seconds"
+// reference already proved on the R5 build. The "2 seconds"
 // centre-screen banner is done server-side instead — see the
 // Nyx_UiTimer() GameText in the example .pwn files (GameTextForPlayer,
 // 2000 ms, style 3), which fires as soon as Nyx_HasClient() turns true.
@@ -33,7 +33,7 @@ constexpr uint32_t kColorError = 0xFFFF6347;    // red: download failed
 void Enqueue(uint32_t color, const std::string& text);
 
 // Show every queued line in the SA-MP chat. GAME THREAD ONLY — called
-// from render::Tick(). R5-gated and silent when samp.dll / the chat
+// from render::Tick(). Build-gated and silent when samp.dll / the chat
 // object is not available yet.
 void Drain();
 

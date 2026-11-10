@@ -5,7 +5,7 @@
 //   CChat::AddMessage(this, D3DCOLOR color, const char* text)  thiscall
 //   this = *reinterpret_cast<void**>(samp.dll + kRefChat)
 //   fn   = samp.dll + kCChat_AddMessage
-// R5-gated: Drain() does nothing unless samp::IsR5Build() is true.
+// Build-gated: Drain() does nothing unless samp::IsSupportedBuild().
 #include "chatui.h"
 
 #include "log.h"
@@ -47,12 +47,14 @@ void Drain() {
         if (g_queue.empty()) return;
         lines.swap(g_queue);
     }
-    if (!nyx::samp::IsR5Build()) return;
-    void* chat = *reinterpret_cast<void**>(nyx::samp::Addr(nyx::samp::r5::kRefChat));
+    if (!nyx::samp::IsSupportedBuild()) return;
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver) return;
+    void* chat = *reinterpret_cast<void**>(nyx::samp::Addr(ver->refChat));
     if (!chat) return;
     for (const auto& line : lines) {
         urmem::call_function<urmem::calling_convention::thiscall, void>(
-            nyx::samp::Addr(nyx::samp::r5::kCChat_AddMessage), chat,
+            nyx::samp::Addr(ver->chatAddMessage), chat,
             static_cast<unsigned long>(line.color), line.text.c_str());
         NYX_LOGI("[chat] %s", line.text.c_str());
     }
