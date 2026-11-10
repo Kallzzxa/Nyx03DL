@@ -1,18 +1,14 @@
-// raknet.cpp — minimal RakClient access for Nyx03DL (polling only, no hooks).
+// raknet.cpp — minimal CNetGame access for Nyx03DL (polling only, no hooks).
 //
 // Written for Nyx03DL (M2), from reference/customskin-0.3.7-R5
 // vendor/raknet/rakclient.h + src/net/raknet.cpp (GPL-3.0).
 //
-// VTABLE SLOT (MSVC layout, destructor = slot 0, then the virtuals in
-// declaration order exactly as written in vendor/raknet/rakclient.h).
-// Only IsConnected is called through the vtable now (slot 18). The
-// GetServerID call (former slot 39) was REMOVED in v1.2.1: on 0.3.7-R1
-// it crashed the game right after connect, with the log stopping before
-// "connected to" and the fault landing in ntdll. The server address
-// now comes from CNetGame's own fields (see GetServerAddress below),
-// which are plain memory reads — they cannot dispatch to a wrong
-// function. The field offsets are per-build (samp.h) and verified
-// against SAMP-API's packed CNetGame layouts + SAMP-UDF's tables.
+// v1.2.2: NO RakClient vtable calls remain (see raknet.h for why).
+// Everything here is a plain read of CNetGame fields. The offsets live
+// in the per-build table (samp.h) and are verified in samp.cpp against
+// SAMP-API's packed CNetGame layouts (R1: m_nGameState at 957, m_pRakClient
+// at 969 — the latter confirmed by the actual GetRakClient bytes in a
+// user's log) and SAMP-UDF's offset tables.
 #include "raknet.h"
 
 #include "samp.h"
@@ -26,32 +22,6 @@
 
 namespace nyx {
 namespace rak {
-namespace {
-
-// VTABLE SLOT (counted from vendor/raknet/rakclient.h, see header comment).
-// Only IsConnected is still called through the vtable (v1.2.1 removed the
-// GetServerID call — see raknet.h). Slot 18 survived many menu polls on
-// R1 before the v1.2.0 crash, which happened later in GetServerAddress.
-constexpr size_t kVtIsConnected = 18;
-
-#ifdef _WIN32
-using GetRakClientFn = void*(__thiscall*)(void*);  // CNetGame::GetRakClient()
-using IsConnectedFn = bool(__thiscall*)(void*);     // RakClient::IsConnected()
-
-void* VTableFn(void* rakClient, size_t slot) {
-    if (!rakClient) return nullptr;
-    void** vtable = *reinterpret_cast<void***>(rakClient);
-    if (!vtable) return nullptr;
-    // Defensive: the slot must point inside samp.dll's image. A garbage
-    // RakClient pointer (or a wrong vtable) must never dispatch anywhere.
-    uintptr_t fn = reinterpret_cast<uintptr_t>(vtable[slot]);
-    uintptr_t base = samp::Base();
-    if (fn < base || fn >= base + samp::ImageSize()) return nullptr;
-    return reinterpret_cast<void*>(fn);
-}
-#endif
-
-}  // namespace
 
 void* NetGame() {
 #ifdef _WIN32
@@ -64,26 +34,26 @@ void* NetGame() {
 #endif
 }
 
-void* ResolveRakClient() {
+int GameState(void* netGame) {
 #ifdef _WIN32
-    void* netgame = NetGame();
-    if (!netgame) return nullptr;
     const auto* ver = nyx::samp::ActiveVersion();
-    if (!ver) return nullptr;
-    auto fn = reinterpret_cast<GetRakClientFn>(samp::Addr(ver->getRakClient));
-    return fn(netgame);
+    if (!ver || !netGame) return -1;
+    return *reinterpret_cast<const int*>(reinterpret_cast<const char*>(netGame) +
+                                         ver->gameStateOff);
 #else
-    return nullptr;  // no samp.dll on Linux (unit harness)
+    (void)netGame;
+    return -1;
 #endif
 }
 
-bool IsConnected(void* rakClient) {
+bool IsConnected(void* netGame) {
 #ifdef _WIN32
-    auto fn = reinterpret_cast<IsConnectedFn>(VTableFn(rakClient, kVtIsConnected));
-    if (!fn) return false;
-    return fn(rakClient);
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver || !netGame) return false;
+    int state = GameState(netGame);
+    return state == ver->stateConnected || state == ver->stateWaitJoin;
 #else
-    (void)rakClient;
+    (void)netGame;
     return false;
 #endif
 }

@@ -1,28 +1,22 @@
-// raknet.h — minimal RakClient access for Nyx03DL (polling only, no hooks).
+// raknet.h — minimal CNetGame access for Nyx03DL (polling only, no hooks).
 //
 // Written for Nyx03DL (M2), from reference/customskin-0.3.7-R5
 // vendor/raknet/rakclient.h + src/net/raknet.cpp (GPL-3.0).
 //
-// WHY A RAW VTABLE CALL FOR IsConnected:
-// samp.dll is built with MSVC; this .asi is built with zig/MinGW (Clang,
-// Itanium C++ ABI). A C++ class compiled under the Itanium ABI lays out
-// its vtable differently from MSVC (Itanium emits TWO destructor slots,
-// MSVC ONE), so calling `rak->IsConnected()` through a locally-defined
-// C++ interface would dispatch to the wrong slot. The reference .asi
-// could use the interface directly because it was built with MSVC.
-// We therefore read the vtable pointer ourselves and call slot 18 as a
-// plain __thiscall function pointer. The slot index was counted by hand
-// from vendor/raknet/rakclient.h — see raknet.cpp.
-//
-// v1.2.1: the server address is NO LONGER read via RakClient::GetServerID
-// (vtable slot 39). On 0.3.7-R1 that call crashed the game right after
-// connect — the log stopped before "connected to", i.e. inside
-// GetServerAddress, the only unverified vtable call there — with the
-// fault in ntdll. The address now comes from CNetGame's own fields
-// (m_szHostAddress + m_nPort, per-build offsets in samp.h), which are
-// plain memory reads that cannot dispatch to a wrong function. Only
-// IsConnected still uses the vtable, and its slot survived many polls
-// in the menu on R1 before the crash, so it is the least suspicious one.
+// v1.2.2: this file NO LONGER CALLS RakClient AT ALL. Two vtable calls
+// died on 0.3.7-R1, one after the other:
+//   - GetServerID (slot 39) crashed the game right after connect
+//     (v1.2.0, fault in ntdll, log stopped before "connected to");
+//   - IsConnected (slot 18) never returned true on R1 (v1.2.1 test:
+//     game connected and playing, but the log never got past
+//     "monitor: started" — the monitor loop logs nothing while it
+//     believes it is disconnected).
+// Both are replaced by plain reads of CNetGame's own fields
+// (m_szHostAddress + m_nPort for the address, m_nGameState for the
+// connection state), which cannot dispatch to a wrong function. The
+// field offsets are per-build (samp.h) and verified against SAMP-API's
+// packed CNetGame layouts + SAMP-UDF's tables. NOTE: GAME_MODE values
+// differ per build (R1: CONNECTED=14, WAITJOIN=15; R5-1: 5 and 6).
 #pragma once
 
 #include <cstdint>
@@ -44,13 +38,11 @@ struct ServerAddress {
 // when no CNetGame exists yet (not connected / menu). Plain read only.
 void* NetGame();
 
-// Resolve the live RakClientInterface* via CNetGame (per-build RVA table).
-// Returns nullptr when no CNetGame exists yet (not connected / menu).
-// This only READS samp.dll memory; it installs no hook.
-void* ResolveRakClient();
+// CNetGame::m_nGameState, or -1 when there is no CNetGame yet.
+int GameState(void* netGame);
 
-// True if the RakClient reports a live connection (vtable slot 18).
-bool IsConnected(void* rakClient);
+// True when the game state is CONNECTED or WAITJOIN for this build.
+bool IsConnected(void* netGame);
 
 // Server address of the current connection, read from the CNetGame
 // fields (m_szHostAddress + m_nPort, resolved via getaddrinfo so a

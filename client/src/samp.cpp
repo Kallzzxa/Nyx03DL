@@ -37,6 +37,9 @@ const VersionAddrs kR5_1 = {
     0x68170,   // chatAddMessage
     0x30,      // hostAddressOff (m_szHostAddress)
     0x235,     // serverPortOff (m_nPort)
+    0x3CD,     // gameStateOff (m_nGameState: 973)
+    0x5,       // stateConnected (GAME_MODE_CONNECTED, R5 enum)
+    0x6,       // stateWaitJoin (GAME_MODE_WAITJOIN, R5 enum)
 };
 
 // R1: from SAMP-API multiver, sampapi/0.3.7-R1 — CNetGame.cpp
@@ -62,6 +65,9 @@ const VersionAddrs kR1 = {
     0x645A0,   // chatAddMessage
     0x20,      // hostAddressOff (m_szHostAddress)
     0x225,     // serverPortOff (m_nPort)
+    0x3BD,     // gameStateOff (m_nGameState: 957)
+    14,        // stateConnected (GAME_MODE_CONNECTED, R1 enum)
+    15,        // stateWaitJoin (GAME_MODE_WAITJOIN, R1 enum)
 };
 
 }  // namespace versions

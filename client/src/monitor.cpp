@@ -234,14 +234,25 @@ void MonitorLoop() {
     // v1.1.0 hello (presence): due immediately once READY.
     Clock::time_point lastHello = Clock::now() - std::chrono::hours(1);
     bool helloOk = false;
+    // v1.2.2: log every CNetGame state transition so a future "monitor
+    // never sees the connection" is diagnosable from the log alone.
+    int lastGameState = -2;
 
     NYX_LOGI("monitor: started (poll %d ms, probe retry %d ms)", kPollMs, kProbeRetryMs);
 
     for (;;) {
         SleepMs(kPollMs);
 
-        void* rak = rak::ResolveRakClient();
-        bool connected = rak && rak::IsConnected(rak);
+        // v1.2.2: connection state comes from CNetGame::m_nGameState
+        // (field read), not from RakClient::IsConnected — the vtable
+        // slot never returned true on 0.3.7-R1.
+        void* netgame = rak::NetGame();
+        int gameState = rak::GameState(netgame);
+        if (gameState != lastGameState) {
+            NYX_LOGI("game state %d -> %d", lastGameState, gameState);
+            lastGameState = gameState;
+        }
+        bool connected = rak::IsConnected(netgame);
 
         if (!connected) {
             if (wasConnected) {
@@ -265,7 +276,7 @@ void MonitorLoop() {
         if (!wasConnected)
             NYX_LOGI("connected; reading server address from CNetGame fields...");
         rak::ServerAddress srv;
-        if (!rak::GetServerAddress(rak::NetGame(), srv)) {
+        if (!rak::GetServerAddress(netgame, srv)) {
             // Connected but the server address is not readable yet; keep
             // polling — never a reason to crash or to probe blindly.
             continue;
