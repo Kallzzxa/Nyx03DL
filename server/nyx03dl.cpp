@@ -86,11 +86,24 @@ static std::set<int> g_seen_players;  // playerids with a skin mapping
 
 // Fetch a string argument from an AMX native call. Returns false when
 // the address is invalid.
+//
+// BUGFIX v1.0.1: Pawn strings are stored in AMX memory as an array of
+// cells (one cell per character), NOT as a C char* string. The old code
+// did `out = (const char *)addr`, which on little-endian x86 read only
+// the first cell's low byte ("skin1.dff" -> "s", then a 0x00 byte ends
+// the string). That is why the server log showed
+// SetCostumNyx03DL(20000, "s", "s") FAILED: bad dff filename.
+// The correct conversion is amx_GetString(), which unpacks cell-by-cell
+// into a C string (forwarded through pAMXFunctions by amxplugin.c,
+// same as amx_GetAddr/amx_Register already used here).
 static bool amx_string_param(AMX *amx, cell param, std::string &out) {
     cell *addr = nullptr;
     if (amx_GetAddr(amx, param, &addr) != AMX_ERR_NONE || addr == nullptr)
         return false;
-    out = (const char *)addr;
+    char buf[256];
+    if (amx_GetString(buf, addr, 0, sizeof(buf)) != AMX_ERR_NONE)
+        return false;
+    out = buf;
     return true;
 }
 
