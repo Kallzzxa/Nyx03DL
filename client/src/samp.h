@@ -4,25 +4,6 @@
 // Changes: only the pieces M2 needs (base resolve + fingerprint). No
 // urmem, no DebugChat, no hook anchors — M2 performs no patching at all.
 // Non-Windows builds get stubs that report "not loaded" (unit harness).
-//
-// v1.2.0: per-build RVA table. The .asi used to be R5-1 only; a user log
-// proved the gate was the whole story on 0.3.7-R1 (SizeOfImage 0x330000,
-// TimeDateStamp 0x5542F47A — .asi exited before doing anything). R1
-// addresses come from BlastHackNet/SAMP-API (multiver branch,
-// include/src sampapi/0.3.7-R1: CNetGame.cpp, CChat.cpp) — the same
-// source the R5-1 table was cross-checked against (its R5-1 values match
-// the reference repo exactly), plus SAMP-UDF-for-AutoHotKey for the chat
-// pointer (0x21A0E4, agrees). Two R1 addresses could NOT be verified
-// from any public table and are NOT guessed:
-//   - CNetGame::Process: SAMP-API's R1 CNetGame.cpp does not define it.
-//     The per-frame tick instead hooks CNetGame::UpdateNetwork (0xAD70,
-//     SAMP-API R1), which Process() calls once per frame.
-//   - ScrSetPlayerSkin: no public R1 address found. The hook is simply
-//     not installed on R1 (scrSetPlayerSkin == 0); the per-frame Tick
-//     still swaps the template, so a custom skin shows on the NEXT
-//     /setskin after the swap (repeat the command once). Do NOT invent
-//     an address here — a wrong hook address crashes the game on every
-//     skin RPC.
 #pragma once
 
 #include <cstdint>
@@ -59,6 +40,8 @@ struct VersionAddrs {
     uintptr_t hostAddressOff;   // CNetGame::m_szHostAddress (char[257])
     uintptr_t serverPortOff;    // CNetGame::m_nPort (int, packed)
     uintptr_t gameStateOff;     // CNetGame::m_nGameState (int, packed)
+    uintptr_t playerPoolsOff;   // CNetGame::m_pPools (Pools*); 0 = unknown
+                                // (v1.2.4 rebuild disabled on that build)
     int stateConnected;         // GAME_MODE_CONNECTED value for this build
     int stateWaitJoin;          // GAME_MODE_WAITJOIN value for this build
 };

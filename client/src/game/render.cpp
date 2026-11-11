@@ -24,6 +24,7 @@
 #include "chatui.h"
 #include "log.h"
 #include "nyx_state.h"
+#include "raknet.h"
 #include "samp.h"
 #include "skinload.h"
 
@@ -31,6 +32,7 @@
 #include <urmem.hpp>
 
 #include <cstdint>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -139,6 +141,47 @@ void SwapReadySkin(int skinid, int baseid, void* clump, void* /*ctx*/) {
     SwapOne(skinid, baseid, clump);
 }
 
+// --- v1.2.4: rebuild the local ped once when a custom skin is learned ---
+// The /players mapping is polled every ~2 s, so the SetPlayerSkin RPC
+// usually arrives BEFORE the .asi knows the player wears a custom skin:
+// the ScrSetPlayerSkin hook then finds nothing to swap and the ped is
+// built from the un-swapped template (clown). The Tick swap lands later,
+// but a template swap alone never changes a ped that already exists —
+// only a rebuild does (v1.2.2 proved it: the second /setskin, i.e. a
+// rebuild, is what showed the custom skin). So when the mapping newly
+// shows the LOCAL player wearing a custom skin, Tick rebuilds the local
+// ped ONCE — via CPed::SetModelIndex, the exact function the game's own
+// skin RPC calls — after the template swap is in place. One /setskin
+// then shows the custom within ~2 s, with no second command.
+// Local player only for now (remote peds need the CPlayerPool array,
+// whose offset depends on the MSVC std::string size and is unverified).
+std::map<int, int> g_lastSkins;                  // playerid -> skinid, last Tick
+std::unordered_map<int, int> g_rebuildPending;   // playerid -> skinid (latest wins)
+
+// True iff base `baseid` currently points at the custom clump of `skinid`.
+bool IsSwapped(int baseid, int skinid) {
+    auto it = g_swapped.find(baseid);
+    return it != g_swapped.end() && it->second.customId == skinid;
+}
+
+// Local player ped, or nullptr when not spawned yet (menu / dead /
+// connecting). GTA FindPlayerPed(-1), __cdecl.
+void* FindLocalPed() {
+    return urmem::call_function<urmem::calling_convention::cdeclcall, void*>(
+        gta::FindPlayerPed + GtaDelta(), -1);
+}
+
+// Rebuild one live ped to `baseid` via CPed::SetModelIndex (GTA 1.0 US,
+// plugin-sdk CPed.cpp: direct __thiscall at 0x5E4880). Same call the
+// game's own skin RPC makes; safe on the game thread once the template
+// swap is in place. The ped's model is always the base id (the server
+// never sends a custom id on the wire).
+void RebuildPed(void* ped, int baseid) {
+    urmem::call_function<urmem::calling_convention::thiscall, void>(
+        gta::CPed_SetModelIndex + GtaDelta(), ped,
+        static_cast<unsigned int>(baseid));
+}
+
 // CNetGame::Process(this), per frame — our main-thread heartbeat.
 void __fastcall Hooked_Process(void* self, void* /*edx*/) {
     g_processHook.call<urmem::calling_convention::thiscall, void>(self);
@@ -189,6 +232,10 @@ void Tick() {
         NYX_LOGI("render: restore requested (disconnect/server change)");
         RestoreAll();
         skinload::FreeAll();
+        // v1.2.4: a new server means a new mapping — drop queued rebuilds
+        // and the last-seen snapshot with it.
+        g_rebuildPending.clear();
+        g_lastSkins.clear();
     }
 
     // Lazy-load + swap every skin a player currently wears.
@@ -199,6 +246,71 @@ void Tick() {
         if (!skinload::EnsureLoaded(m)) continue;
     }
     skinload::ForEachReady(&SwapReadySkin, nullptr);
+
+    // v1.2.4: notice when the LOCAL player's custom skin newly appears
+    // or changes, and queue a one-time ped rebuild for it.
+    {
+        std::map<int, int> skins = nyx::GlobalState().PlayerSkins();
+        int localId = nyx::rak::LocalPlayerId();
+        if (localId >= 0) {
+            auto cur = skins.find(localId);
+            auto prev = g_lastSkins.find(localId);
+            int curSkin = (cur == skins.end() ? 0 : cur->second);
+            int prevSkin = (prev == g_lastSkins.end() ? 0 : prev->second);
+            if (curSkin != 0 && curSkin != prevSkin)
+                g_rebuildPending[localId] = curSkin;  // latest wins
+            if (curSkin == 0) g_rebuildPending.erase(localId);
+        }
+        g_lastSkins = skins;
+    }
+
+    // v1.2.4: run queued rebuilds (local player only). An entry waits
+    // until its template swap is in place AND the ped exists; it is
+    // dropped if the mapping changes again or the skin leaves the
+    // manifest, so at most one rebuild happens per skin change.
+    for (auto it = g_rebuildPending.begin(); it != g_rebuildPending.end();) {
+        int pid = it->first;
+        int skinid = it->second;
+        std::map<int, int> skins = nyx::GlobalState().PlayerSkins();
+        auto cur = skins.find(pid);
+        if (cur == skins.end() || cur->second != skinid) {
+            it = g_rebuildPending.erase(it);  // unworn / changed again
+            continue;
+        }
+        if (pid != nyx::rak::LocalPlayerId()) {
+            it = g_rebuildPending.erase(it);  // not local (local-only)
+            continue;
+        }
+        std::vector<nyx::Model> models = nyx::GlobalState().Models();
+        const nyx::Model* found = nullptr;
+        for (const auto& m : models)
+            if (m.skinid == skinid) {
+                found = &m;
+                break;
+            }
+        if (!found) {
+            it = g_rebuildPending.erase(it);  // skin left the manifest
+            continue;
+        }
+        if (!found->dffReady || !found->txdReady) {
+            ++it;  // still downloading; wait
+            continue;
+        }
+        if (!IsSwapped(found->baseid, skinid)) {
+            ++it;  // template not swapped yet; the swap pass will get it
+            continue;
+        }
+        void* ped = FindLocalPed();
+        if (!ped) {
+            ++it;  // not spawned yet; wait
+            continue;
+        }
+        RebuildPed(ped, found->baseid);
+        NYX_LOGI("render: rebuilt local ped to base %d (custom %d) after "
+                 "learning the skin",
+                 found->baseid, skinid);
+        it = g_rebuildPending.erase(it);
+    }
 
     // Restore bases whose skin is no longer worn by ANY player (player
     // changed skin, disconnected, or the skin left the manifest). Without

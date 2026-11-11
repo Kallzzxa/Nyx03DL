@@ -7,9 +7,8 @@
 // CStreaming::RequestModel.
 //
 // Only the pieces M3 needs are kept: RwStream / clump / txd functions,
-// the model-info array + clump field offset, RequestModel, and the
-// CEntity vtable indices (listed for documentation — M3 NEVER calls
-// SetModelIndex/CreateRwObject/DeleteRwObject on a live ped; see README).
+// the model-info array + clump field offset, RequestModel, FindPlayerPed,
+// and CPed::SetModelIndex (v1.2.4 rebuild — see render.cpp).
 #pragma once
 
 #include <cstdint>
@@ -36,11 +35,20 @@ constexpr int kModelInfo_RwObject = 0x1C;        // CBaseModelInfo::m_pRwClump o
 // resident so the clump swap lands before the ped rebuild
 constexpr uintptr_t CStreaming_RequestModel = 0x4087E0;
 constexpr int kStreamPriorityLoad = 0x10; // priority-request flag bit
-// CEntity vtable indices (thiscall via *(void***)ped) — DOCUMENTATION ONLY,
-// M3 never calls these on a live ped (see render.cpp / README).
+// CEntity vtable indices (thiscall via *(void***)ped) — SetModelIndex
+// is index 5 (plugin-sdk CEntity.cpp calls (*(void***)this)[5]).
 constexpr int kVt_SetModelIndex = 5;
 constexpr int kVt_CreateRwObject = 7;
 constexpr int kVt_DeleteRwObject = 8;
+
+// CPed::SetModelIndex, __thiscall (CPed*, unsigned int) — direct GTA
+// 1.0 US address (plugin-sdk CPed.cpp). This is the exact function
+// SA-MP's own ScrSetPlayerSkin handler calls on a ped, so calling it
+// from the game thread rebuilds the ped from its (possibly swapped)
+// template. v1.2.4 uses it once per learned skin change (see
+// render.cpp); the old "never call SetModelIndex on a live ped" rule
+// is retired by that version — a rebuild is precisely what was missing.
+constexpr uintptr_t CPed_SetModelIndex = 0x5E4880;
 
 // rw enums / chunk ids
 constexpr int kStreamFileName = 2;        // rwSTREAMFILENAME

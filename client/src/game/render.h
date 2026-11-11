@@ -8,16 +8,22 @@
 // them from skinload (fed by NyxState + the M2 cache).
 //
 // GAME-THREAD ONLY: Tick / RestoreAll / EnsureSwapForCustom write game
-// memory (base template clump fields). They are called ONLY from the
+// memory (base template clump fields, and — since v1.2.4 — one
+// CPed::SetModelIndex rebuild per learned skin change, the same call
+// the game's own skin RPC makes). They are called ONLY from the
 // Process hook and the ScrSetPlayerSkin hook — both run on the game
 // thread. The monitor thread requests a restore by setting a flag in
 // NyxState (RequestRestore), which Tick consumes; it NEVER calls here
 // directly.
 //
-// HARD RULE — NEVER TOUCH A LIVE PED: only the CBaseModelInfo template
-// clump field (+0x1C) is swapped. DeleteRwObject / CreateRwObject /
-// SetModelIndex are NEVER called on a ped that already exists. The game
-// clones the template naturally when a ped (re)spawns.
+// v1.2.4 retires the old "NEVER TOUCH A LIVE PED" rule: only swapping
+// the template was not enough, because a ped that already exists never
+// re-reads its template — a rebuild is required, and the second
+// /setskin in v1.2.2 proved the rebuild is what shows the custom skin.
+// The rebuild is deliberately narrow: local player only, once per
+// mapping change, only after the template swap is in place, only on
+// the game thread. DeleteRwObject / CreateRwObject are still never
+// called directly — SetModelIndex does the rebuild itself.
 #pragma once
 
 namespace render {

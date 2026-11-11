@@ -46,6 +46,30 @@ int GameState(void* netGame) {
 #endif
 }
 
+// v1.2.4: CNetGame -> m_pPools (Pools*, +playerPoolsOff) -> m_pPlayer
+// (7th field, +0x18) -> CPlayerPool -> m_localInfo.m_nId (uint16 at
+// +0x4; m_nLargestId is the int at +0x0). SAMP-API R1 CPlayerPool.h /
+// CNetGame.h. Every pointer is null-checked; the id is range-checked,
+// so a bad read degrades to "unknown" instead of a wild playerid.
+int LocalPlayerId() {
+#ifdef _WIN32
+    const auto* ver = nyx::samp::ActiveVersion();
+    if (!ver || !ver->playerPoolsOff) return -1;
+    void* netGame = NetGame();
+    if (!netGame) return -1;
+    void* pools = *reinterpret_cast<void**>(reinterpret_cast<char*>(netGame) +
+                                            ver->playerPoolsOff);
+    if (!pools) return -1;
+    void* playerPool = *reinterpret_cast<void**>(reinterpret_cast<char*>(pools) + 0x18);
+    if (!playerPool) return -1;
+    uint16_t id = *reinterpret_cast<uint16_t*>(reinterpret_cast<char*>(playerPool) + 0x4);
+    if (id >= 1004) return -1;  // MAX_PLAYERS (SAMP-API CPlayerPool.h)
+    return static_cast<int>(id);
+#else
+    return -1;
+#endif
+}
+
 bool IsConnected(void* netGame) {
 #ifdef _WIN32
     const auto* ver = nyx::samp::ActiveVersion();

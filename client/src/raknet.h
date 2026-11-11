@@ -38,6 +38,13 @@ struct ServerAddress {
 // when no CNetGame exists yet (not connected / menu). Plain read only.
 void* NetGame();
 
+// Local playerid (CPlayerPool::m_localInfo.m_nId), or -1 when it cannot
+// be determined (no CNetGame, no pools, or this build has no verified
+// playerPoolsOff — v1.2.4 rebuild stays off there). Plain reads only;
+// the id is sanity-checked against MAX_PLAYERS so a wrong offset can
+// never produce a wild id.
+int LocalPlayerId();
+
 // CNetGame::m_nGameState, or -1 when there is no CNetGame yet.
 int GameState(void* netGame);
 

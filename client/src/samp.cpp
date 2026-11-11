@@ -38,6 +38,8 @@ const VersionAddrs kR5_1 = {
     0x30,      // hostAddressOff (m_szHostAddress)
     0x235,     // serverPortOff (m_nPort)
     0x3CD,     // gameStateOff (m_nGameState: 973)
+    0,         // playerPoolsOff (v1.2.4 rebuild: R5-1 offset unverified,
+               // stays off here rather than dereferencing a guessed pointer)
     0x5,       // stateConnected (GAME_MODE_CONNECTED, R5 enum)
     0x6,       // stateWaitJoin (GAME_MODE_WAITJOIN, R5 enum)
 };
@@ -76,6 +78,11 @@ const VersionAddrs kR1 = {
     0x20,      // hostAddressOff (m_szHostAddress)
     0x225,     // serverPortOff (m_nPort)
     0x3BD,     // gameStateOff (m_nGameState: 957)
+    0x3CD,     // playerPoolsOff (CNetGame::m_pPools: SAMP-API R1
+               // CNetGame.h tail order — m_nGameState 0x3BD, TICK 0x3C1,
+               // m_pSettings 0x3C5, m_pRakClient 0x3C9 (confirmed by the
+               // actual GetRakClient bytes in a user's log), so m_pPools
+               // is next; Pools::m_pPlayer is its 7th field, +0x18)
     14,        // stateConnected (GAME_MODE_CONNECTED, R1 enum)
     15,        // stateWaitJoin (GAME_MODE_WAITJOIN, R1 enum)
 };
