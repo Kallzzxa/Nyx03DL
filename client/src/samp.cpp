@@ -53,14 +53,24 @@ const VersionAddrs kR5_1 = {
 // confirmed by the actual GetRakClient bytes in the user's log
 // (8B 81 C9 03 00 00 C3 = mov eax,[ecx+0x3C9]; ret). Host/port offsets
 // agree with SAMP-UDF (SERVERIP 0x20, SERVERPORT 0x225 for R1).
-// scrSetPlayerSkin == 0: no public R1 address found, NOT guessed.
+// scrSetPlayerSkin 0x15860: found DYNAMICALLY, not from a public table.
+// rpcprobe (tools/rpcprobe) hooked RegisterAsRemoteProcedureCall (RVA
+// 0x34B00) and logged the game's own registration at connect, 2026-11-11:
+//   rpc register: id=153 handler=0x03C15860 (RVA 0x15860)
+// RPC 153 = SetPlayerSkin (open.mp core.hpp + the R1 binary's own id
+// table at 0x100D3F98). Static analysis had the same value as its closest
+// candidate but only at ~40-50% (the constant also appears as obfuscator
+// decoys), so it was NOT used until the probe log confirmed it. The
+// handler at 0x15860 starts with a JMP into .poop (E9 A2 B6 27 00);
+// urmem's call() restores the original bytes before calling it, so the
+// thunk still works.
 const VersionAddrs kR1 = {
     "0.3.7-R1", "CNetGame::UpdateNetwork",
     0x00330000, 0x5542F47A,
     0x21A0F8,  // refNetGame
     0x1A40,    // getRakClient
     0xAD70,    // netGameProcess (CNetGame::UpdateNetwork, called per-frame)
-    0,         // scrSetPlayerSkin (unknown on R1 — no hook)
+    0x15860,   // scrSetPlayerSkin (rpcprobe-confirmed, see above)
     0x21A0E4,  // refChat
     0x645A0,   // chatAddMessage
     0x20,      // hostAddressOff (m_szHostAddress)

@@ -70,10 +70,11 @@ bool Init() {
         return false;
     }
     if (!ver->scrSetPlayerSkin) {
-        // v1.2.0 (R1): no verified ScrSetPlayerSkin address exists, so
+        // No verified ScrSetPlayerSkin address exists on this build, so
         // the hook is skipped instead of guessed. Skins still apply via
         // the per-frame Tick swap — the custom shows on the NEXT
         // /setskin after the swap, so repeat the command once.
+        // (R1 used to take this path until rpcprobe confirmed 0x15860.)
         NYX_LOGW("skinhook: no ScrSetPlayerSkin hook on %s; skins apply via "
                  "per-frame Tick (repeat /setskin once after the swap)",
                  ver->name);
