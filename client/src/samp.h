@@ -12,7 +12,9 @@ namespace nyx {
 namespace samp {
 
 // One RVA table per supported samp.dll build. netGameProcess is the
-// per-frame hook target (R5: CNetGame::Process; R1: CNetGame::UpdateNetwork).
+// per-frame hook target (R5: CNetGame::Process; R1: CNetGame::UpdateNetwork
+// — SAMP-API's R1 CNetGame.cpp does not define Process, so the tick hooks
+// UpdateNetwork (0xAD70), which Process() calls once per frame).
 // scrSetPlayerSkin == 0 means "no hook on this build" (see header note).
 // hostAddressOff / serverPortOff / gameStateOff are CNetGame field offsets
 // (packed struct, SAMP-API headers) used to read the server address and
