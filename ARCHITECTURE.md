@@ -96,11 +96,41 @@ masquerade versi dan tidak butuh packet rewriting.
 - Config: `nyx03dl.cfg` atau server.cfg: `nyx_http_port`, `nyx_base_pool`
   (daftar ped ID yang boleh dipakai sebagai base).
 
+### v1.3.0 — replace kendaraan (ditambahkan 2026-11-11)
+
+Satu model kendaraan GTA (400–611) diganti `.dff`/`.txd` custom — model
+TETAP pakai ID yang sama, jadi spawn normal `CreateVehicle(vehid, ...)`.
+Bedanya dengan skin: tidak ada ID custom 20000+ dan tidak ada mapping
+per-pemain — template model di-swap global begitu file ter-download,
+untuk semua pemain dengan `.asi`.
+
+- Endpoint baru (terpisah supaya manifest skin tetap byte-identik untuk
+  client lama): `GET /nyx03dl/vehicles` → JSON array
+  `{vehid, dff, txd, dff_crc32, txd_crc32, dff_size, txd_size, maxspeed, accel, brake}`
+  (handling 0 = stock). File kendaraan disajikan lewat endpoint `/file`
+  yang sama (cari di registry skin dulu, lalu registry kendaraan).
+- Native baru: `NyxReplaceVeh(vehid, dff[], txd[])` → 1/0;
+  `NyxSetVehHandling(vehid, Float:maxspeed, Float:accel, Float:brake)`
+  → 1/0 (0.0 = biarkan bawaan; harus setelah NyxReplaceVeh).
+- Client: probe `/vehicles` di port yang sama dengan manifest skin
+  (gagal = server lama, skin tetap jalan). Download/cache pakai jalur
+  yang sama (kunci = vehid, tidak bentrok dengan skinid 20000+).
+  Swap template kendaraan tanpa gate pemain; handling di-apply di Tick
+  dengan patch `cHandlingDataMgr` (manager 0xC2B9C8, entry =
+  `m_aVehicleHandling[modelInfo->m_nHandlingId]`, diverifikasi
+  `entry->m_nVehicleId == vehid` — motor/perahu/pesawat di-skip karena
+  handling-nya di array terpisah). Original handling dicatat saat
+  pertama patch dan dikembalikan saat disconnect (RestoreAll).
+- Batasan v1.3.0: kendaraan yang sudah muncul sebagai model bawaan
+  sebelum template di-swap baru berubah setelah re-stream / spawn
+  ulang (tidak ada rebuild kendaraan seperti ped v1.2.4 — butuh
+  enumerasi vehicle pool, belum dikerjakan).
+
 ### Yang TIDAK dikerjakan di run ini
 
 - .so Android (fase terpisah, setelah PC terbukti jalan di tangan user).
-- Custom objects (AddSimpleModel) — skins dulu, sesuai permintaan user.
-- Client 0.3.7 R1–R4 (target R5 dulu; alamat hook beda per versi).
+- Custom objects (AddSimpleModel) — skins + kendaraan dulu.
+- Client 0.3.7 R2–R4, R5-2 (target R1 + R5-1; alamat hook beda per versi).
 - Server open.mp (server user = samp-server).
 
 ## Build (VM, tanpa MSVC)

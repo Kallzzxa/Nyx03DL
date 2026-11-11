@@ -84,6 +84,10 @@ std::string PlayersUrl(const std::string& ip, uint16_t httpPort) {
     return "http://" + ip + ":" + std::to_string(httpPort) + "/nyx03dl/players";
 }
 
+std::string VehiclesUrl(const std::string& ip, uint16_t httpPort) {
+    return "http://" + ip + ":" + std::to_string(httpPort) + "/nyx03dl/vehicles";
+}
+
 std::string HelloUrl(const std::string& ip, uint16_t httpPort) {
     return "http://" + ip + ":" + std::to_string(httpPort) + "/nyx03dl/hello";
 }
@@ -136,6 +140,32 @@ bool TryProbePort(const rak::ServerAddress& srv, uint16_t httpPort,
         return false;
     }
     NYX_LOGI("probe: %s -> OK, %zu model(s)", url.c_str(), models.size());
+    return true;
+}
+
+// v1.3.0: probe GET /nyx03dl/vehicles once, on the port the skin
+// manifest came from. On success fills `vehicles` and returns true.
+// On ANY failure returns false and leaves `vehicles` untouched — the
+// server may be an old build without the endpoint (404), in which case
+// the client simply has no vehicles and skins keep working.
+bool TryProbeVehicles(const rak::ServerAddress& srv, uint16_t httpPort,
+                      std::vector<VehicleModel>& vehicles) {
+    std::string url = VehiclesUrl(srv.ip, httpPort);
+    long status = 0;
+    std::string body;
+    if (!http::Get(url, kManifestTimeoutMs, status, body)) {
+        NYX_LOGI("vehicles: %s -> unreachable (status %ld); no vehicles",
+                 url.c_str(), status);
+        return false;
+    }
+    std::string err;
+    if (!ParseVehicles(body, vehicles, err)) {
+        NYX_LOGW("vehicles: %s -> HTTP 200 but bad JSON: %s", url.c_str(),
+                 err.c_str());
+        vehicles.clear();
+        return false;
+    }
+    NYX_LOGI("vehicles: %s -> OK, %zu vehicle(s)", url.c_str(), vehicles.size());
     return true;
 }
 
@@ -205,19 +235,90 @@ State DoProbe(const rak::ServerAddress& srv) {
         }
     }
 
+    // v1.3.0: vehicle replacements, same port as the skin manifest.
+    // A failure here never fails the probe — old servers have no
+    // /vehicles endpoint and the client just runs skins-only. A
+    // successful probe (even an empty list) replaces the vehicle list,
+    // so a vehicle removed server-side disappears client-side too.
+    int vehEnqueued = 0;
+    {
+        std::vector<VehicleModel> vehs;
+        if (TryProbeVehicles(srv, usedPort, vehs)) {
+            std::vector<Model> vmodels;
+            vmodels.reserve(vehs.size());
+            for (const auto& v : vehs) {
+                Model model;
+                model.skinid = v.vehid;  // key: vehid, no collision with 20000+
+                model.baseid = v.vehid;  // replaces its own model
+                model.dffCrc = v.dffCrc;
+                model.txdCrc = v.txdCrc;
+                model.dffSize = v.dffSize;
+                model.txdSize = v.txdSize;
+                model.dffName = v.dff;
+                model.txdName = v.txd;
+                model.isVehicle = true;
+                model.maxspeed = v.maxspeed;
+                model.accel = v.accel;
+                model.brake = v.brake;
+                vmodels.push_back(model);
+            }
+            GlobalState().SetVehicles(vmodels);
+            for (const auto& v : vehs) {
+                if (!cache::HasValid(v.dffCrc, true)) {
+                    NYX_LOGI("cache miss: vehicle %d dff %s (crc %08X), enqueueing",
+                             v.vehid, v.dff.c_str(), v.dffCrc);
+                    dl::Enqueue(v.vehid, FileUrl(srv.ip, usedPort, v.dff),
+                                cache::PathFor(v.dffCrc, true), v.dffCrc, true);
+                    enqueued++;
+                    vehEnqueued++;
+                } else {
+                    NYX_LOGI("cache hit: vehicle %d dff %s (crc %08X)", v.vehid,
+                             v.dff.c_str(), v.dffCrc);
+                }
+                if (!cache::HasValid(v.txdCrc, false)) {
+                    NYX_LOGI("cache miss: vehicle %d txd %s (crc %08X), enqueueing",
+                             v.vehid, v.txd.c_str(), v.txdCrc);
+                    dl::Enqueue(v.vehid, FileUrl(srv.ip, usedPort, v.txd),
+                                cache::PathFor(v.txdCrc, false), v.txdCrc, false);
+                    enqueued++;
+                    vehEnqueued++;
+                } else {
+                    NYX_LOGI("cache hit: vehicle %d txd %s (crc %08X)", v.vehid,
+                             v.txd.c_str(), v.txdCrc);
+                }
+            }
+        }
+    }
+
     if (enqueued == 0) {
-        NYX_LOGI("all %zu model(s) already cached and verified -> READY", models.size());
+        NYX_LOGI("all %zu model(s) already cached and verified -> READY",
+                 GlobalState().Models().size());
         // v1.1.0 UI: show the ready line in-game (chat, game thread drains it).
-        chatui::Enqueue(chatui::kColorOk,
-                        "[Nyx03DL] Custom skins ready (" +
-                            std::to_string(models.size()) + " skin(s) from cache)");
+        // v1.3.0: skins and vehicles get their own lines (only when present).
+        size_t nVeh = 0;
+        for (const auto& m : GlobalState().Models())
+            if (m.isVehicle) nVeh++;
+        size_t nSkin = GlobalState().Models().size() - nVeh;
+        if (nSkin > 0)
+            chatui::Enqueue(chatui::kColorOk,
+                            "[Nyx03DL] Custom skins ready (" +
+                                std::to_string(nSkin) + " skin(s) from cache)");
+        if (nVeh > 0)
+            chatui::Enqueue(chatui::kColorOk,
+                            "[Nyx03DL] Custom vehicles ready (" +
+                                std::to_string(nVeh) + " vehicle(s) from cache)");
         return State::READY;
     }
     NYX_LOGI("enqueued %d file(s) for download", enqueued);
     // v1.1.0 UI: show the downloading line in-game as soon as we start.
-    chatui::Enqueue(chatui::kColorInfo,
-                    "[Nyx03DL] Downloading custom skins... (" +
-                        std::to_string(enqueued) + " file(s))");
+    if (vehEnqueued > 0)
+        chatui::Enqueue(chatui::kColorInfo,
+                        "[Nyx03DL] Downloading custom skins + vehicles... (" +
+                            std::to_string(enqueued) + " file(s))");
+    else
+        chatui::Enqueue(chatui::kColorInfo,
+                        "[Nyx03DL] Downloading custom skins... (" +
+                            std::to_string(enqueued) + " file(s))");
     return State::DOWNLOADING;
 }
 
@@ -320,15 +421,20 @@ void MonitorLoop() {
         if (state == State::DOWNLOADING || state == State::READY) {
             std::vector<dl::Result> done = dl::Drain();
             for (const auto& r : done) {
-                NYX_LOGI("download %s: skin %d %s crc %08X",
-                         r.ok ? "done" : "FAILED", r.skinid,
+                // v1.3.0: the download key is a skinid (20000+) or a
+                // vehid (400-611); label the log/chat line accordingly.
+                bool isVeh = GlobalState().IsVehicle(r.skinid);
+                NYX_LOGI("download %s: %s %d %s crc %08X",
+                         r.ok ? "done" : "FAILED",
+                         isVeh ? "vehicle" : "skin", r.skinid,
                          r.isDff ? "dff" : "txd", r.crc);
                 GlobalState().MarkDownloaded(r.skinid, r.isDff, r.ok);
                 // v1.1.0 UI: surface a failed download in-game instead of
                 // failing silently (skin would just stay base).
                 if (!r.ok) {
                     chatui::Enqueue(chatui::kColorError,
-                                    "[Nyx03DL] Download failed for skin " +
+                                    "[Nyx03DL] Download failed for " +
+                                        std::string(isVeh ? "vehicle " : "skin ") +
                                         std::to_string(r.skinid) +
                                         " (" + (r.isDff ? "dff" : "txd") +
                                         "), will retry next connect.");
@@ -344,10 +450,19 @@ void MonitorLoop() {
                     lastHello = Clock::now() - std::chrono::hours(1);  // hello at once
                     helloOk = false;
                     // v1.1.0 UI: the success line the user asked for.
-                    chatui::Enqueue(chatui::kColorOk,
-                                    "[Nyx03DL] Successfully downloaded " +
-                                        std::to_string(GlobalState().Models().size()) +
-                                        " custom skin(s)!");
+                    // v1.3.0: count skins and vehicles separately.
+                    size_t nSkin = 0, nVeh = 0;
+                    for (const auto& m : GlobalState().Models())
+                        (m.isVehicle ? nVeh : nSkin)++;
+                    std::string msg = "[Nyx03DL] Successfully downloaded ";
+                    if (nSkin > 0)
+                        msg += std::to_string(nSkin) + " custom skin(s)";
+                    if (nVeh > 0) {
+                        if (nSkin > 0) msg += " + ";
+                        msg += std::to_string(nVeh) + " vehicle(s)";
+                    }
+                    msg += "!";
+                    chatui::Enqueue(chatui::kColorOk, msg);
                 }
             }
 

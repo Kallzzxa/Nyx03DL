@@ -30,14 +30,15 @@ mkdir -p out
 # M3 game/hook units need vendored urmem (vendor/urmem/urmem.hpp).
 "$ZIG" c++ -target x86-windows-gnu -O2 -g0 -std=c++17 -Isrc -Ivendor/urmem -c src/game/rwmodel.cpp -o rwmodel.o
 "$ZIG" c++ -target x86-windows-gnu -O2 -g0 -std=c++17 -Isrc -Ivendor/urmem -c src/game/render.cpp -o render.o
+"$ZIG" c++ -target x86-windows-gnu -O2 -g0 -std=c++17 -Isrc -Ivendor/urmem -c src/game/handling.cpp -o handling.o
 "$ZIG" c++ -target x86-windows-gnu -O2 -g0 -std=c++17 -Isrc -Ivendor/urmem -c src/skinhook.cpp -o skinhook.o
 "$ZIG" c++ -target x86-windows-gnu -O2 -g0 -std=c++17 -Isrc -c src/dllmain.cpp -o dllmain.o
 "$ZIG" c++ -target x86-windows-gnu -O2 -g0 -std=c++17 -shared -static-libstdc++ -static-libgcc \
-  crc32.o manifest.o cache.o log.o chatui.o download.o http.o samp.o raknet.o nyx_state.o monitor.o players.o skinload.o rwmodel.o render.o skinhook.o dllmain.o \
+  crc32.o manifest.o cache.o log.o chatui.o download.o http.o samp.o raknet.o nyx_state.o monitor.o players.o skinload.o rwmodel.o render.o handling.o skinhook.o dllmain.o \
   -lwininet -lshell32 -lws2_32 -o out/nyx03dl.dll
 cp out/nyx03dl.dll out/nyx03dl.asi
 
-rm -f crc32.o manifest.o cache.o log.o chatui.o download.o http.o samp.o raknet.o nyx_state.o monitor.o players.o skinload.o rwmodel.o render.o skinhook.o dllmain.o
+rm -f crc32.o manifest.o cache.o log.o chatui.o download.o http.o samp.o raknet.o nyx_state.o monitor.o players.o skinload.o rwmodel.o render.o handling.o skinhook.o dllmain.o
 # Drop the import lib / PDB zig leaves next to the DLL: the PDB embeds
 # absolute build-machine paths and neither file ships with the .asi.
 rm -f out/*.lib out/*.pdb

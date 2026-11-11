@@ -36,6 +36,12 @@ static const int kSkinMax = 30000;
 static const int kBaseMin = 0;
 static const int kBaseMax = 311;
 
+// Valid SA-MP vehicle model ids (v1.3.0: vehicle replacement).
+// A replaced vehicle keeps its own model id — the custom .dff/.txd
+// takes over that model's template on clients with the .asi.
+static const int kVehMin = 400;
+static const int kVehMax = 611;
+
 // Max players tracked (SA-MP 0.3.7 server limit is 1000).
 static const int kMaxPlayers = 1000;
 
@@ -74,6 +80,23 @@ struct SkinEntry {
     uint32_t txd_size = 0;
 };
 
+// v1.3.0: one replaced vehicle model. Unlike skins, a vehicle keeps
+// its own model id (400-611) — the custom files take over that model's
+// template on every client with the .asi. Handling values are 0 when
+// unset (= keep the stock handling.cfg value for that field).
+struct VehicleEntry {
+    int vehid = -1;   // GTA vehicle model id, 400-611
+    std::string dff;  // basename only, e.g. "veh400.dff"
+    std::string txd;  // basename only, e.g. "veh400.txd"
+    uint32_t dff_crc32 = 0;
+    uint32_t txd_crc32 = 0;
+    uint32_t dff_size = 0;
+    uint32_t txd_size = 0;
+    float maxspeed = 0;  // km/h, handling.cfg units (0 = stock)
+    float accel = 0;     // engine acceleration, cfg units (0 = stock)
+    float brake = 0;     // brake deceleration, cfg units (0 = stock)
+};
+
 class Registry {
 public:
     Registry();
@@ -107,6 +130,28 @@ public:
     bool find_file(const std::string &name, SkinEntry &entry,
                    bool &is_dff) const;
 
+    // ---- v1.3.0: vehicle replacement ----
+    // Register a vehicle replacement. Reads dff/txd from
+    // <model_dir>/<basename>, computes CRC32 + size. Idempotent:
+    // re-registering the same vehid with the same files refreshes
+    // crc/size; with different files it updates the entry in place
+    // (handling values are kept). Returns 1 on success, 0 on failure
+    // (vehid outside 400-611, file missing, bad filename).
+    int register_vehicle(int vehid, const std::string &dff,
+                         const std::string &txd,
+                         const std::string &model_dir, std::string &error);
+    // Set handling for a registered vehicle. Each value is 0 to leave
+    // that field stock; negative or absurd values are rejected.
+    // Returns 1 on success, 0 when the vehicle is not registered or a
+    // value is invalid.
+    int set_vehicle_handling(int vehid, float maxspeed, float accel,
+                             float brake, std::string &error);
+    bool is_vehicle_registered(int vehid) const;
+    std::vector<VehicleEntry> snapshot_vehicles() const;
+    // Vehicle counterpart of find_file (for the HTTP /file endpoint).
+    bool find_vehicle_file(const std::string &name, VehicleEntry &entry,
+                           bool &is_dff) const;
+
     // ---- player -> skin mapping ----
     // Returns false when the skin is not registered or playerid is out
     // of range. Does NOT touch game state (the plugin glue calls the
@@ -124,6 +169,7 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<SkinEntry> skins_;
+    std::vector<VehicleEntry> vehicles_;  // v1.3.0
     std::vector<int> base_pool_;
     std::vector<char> base_used_;  // parallel to base_pool_
     std::map<int, int> player_skin_;       // playerid -> skinid
@@ -149,6 +195,13 @@ std::vector<int> default_base_pool();
 //    "dff_size":..,"txd_size":..}
 // CRC32 values are UNSIGNED DECIMAL (not hex) — contractual for M2.
 std::string build_manifest_json(const std::vector<SkinEntry> &skins);
+// Vehicles JSON (v1.3.0, GET /nyx03dl/vehicles): array of
+//   {"vehid":..,"dff":"..","txd":"..",
+//    "dff_crc32":<uint decimal>,"txd_crc32":<uint decimal>,
+//    "dff_size":..,"txd_size":..,
+//    "maxspeed":<number>,"accel":<number>,"brake":<number>}
+// Handling numbers are emitted with %g (0 when unset = stock).
+std::string build_vehicles_json(const std::vector<VehicleEntry> &vehicles);
 // Players JSON: {"<playerid>":<skinid>,...} (connected players only).
 std::string build_players_json(const std::map<int, int> &players);
 std::string json_escape(const std::string &s);

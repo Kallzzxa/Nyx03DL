@@ -229,6 +229,117 @@ bool Registry::find_file(const std::string &name, SkinEntry &entry,
     return false;
 }
 
+// ------------------------------------------------------- v1.3.0 vehicles --
+
+int Registry::register_vehicle(int vehid, const std::string &dff,
+                               const std::string &txd,
+                               const std::string &model_dir,
+                               std::string &error) {
+    if (vehid < kVehMin || vehid > kVehMax) {
+        error = "vehid outside 400-611";
+        return 0;
+    }
+    if (!is_valid_model_filename(dff, ".dff")) {
+        error = "bad dff filename (need a plain basename ending .dff)";
+        return 0;
+    }
+    if (!is_valid_model_filename(txd, ".txd")) {
+        error = "bad txd filename (need a plain basename ending .txd)";
+        return 0;
+    }
+    uint32_t dff_crc = 0, txd_crc = 0, dff_size = 0, txd_size = 0;
+    if (!file_crc32_and_size(model_dir + dff, dff_crc, dff_size)) {
+        error = "dff file not found/unreadable: " + model_dir + dff;
+        return 0;
+    }
+    if (!file_crc32_and_size(model_dir + txd, txd_crc, txd_size)) {
+        error = "txd file not found/unreadable: " + model_dir + txd;
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (size_t i = 0; i < vehicles_.size(); i++) {
+        if (vehicles_[i].vehid != vehid) continue;
+        // Same files: refresh crc/size; different files: update in
+        // place. Handling values are kept either way.
+        vehicles_[i].dff = dff;
+        vehicles_[i].txd = txd;
+        vehicles_[i].dff_crc32 = dff_crc;
+        vehicles_[i].txd_crc32 = txd_crc;
+        vehicles_[i].dff_size = dff_size;
+        vehicles_[i].txd_size = txd_size;
+        return 1;
+    }
+    VehicleEntry e;
+    e.vehid = vehid;
+    e.dff = dff;
+    e.txd = txd;
+    e.dff_crc32 = dff_crc;
+    e.txd_crc32 = txd_crc;
+    e.dff_size = dff_size;
+    e.txd_size = txd_size;
+    vehicles_.push_back(e);
+    return 1;
+}
+
+int Registry::set_vehicle_handling(int vehid, float maxspeed, float accel,
+                                   float brake, std::string &error) {
+    // 0 = leave stock. Caps are permissive sanity limits, not physics:
+    // maxspeed in km/h (cfg units), accel/brake in cfg units.
+    if (maxspeed < 0 || maxspeed > 500) {
+        error = "maxspeed must be 0 (stock) or 0-500 km/h";
+        return 0;
+    }
+    if (accel < 0 || accel > 50) {
+        error = "accel must be 0 (stock) or 0-50";
+        return 0;
+    }
+    if (brake < 0 || brake > 50) {
+        error = "brake must be 0 (stock) or 0-50";
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (size_t i = 0; i < vehicles_.size(); i++) {
+        if (vehicles_[i].vehid != vehid) continue;
+        vehicles_[i].maxspeed = maxspeed;
+        vehicles_[i].accel = accel;
+        vehicles_[i].brake = brake;
+        return 1;
+    }
+    error = "vehicle not registered (call NyxReplaceVeh first)";
+    return 0;
+}
+
+bool Registry::is_vehicle_registered(int vehid) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (size_t i = 0; i < vehicles_.size(); i++)
+        if (vehicles_[i].vehid == vehid) return true;
+    return false;
+}
+
+std::vector<VehicleEntry> Registry::snapshot_vehicles() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return vehicles_;
+}
+
+bool Registry::find_vehicle_file(const std::string &name,
+                                 VehicleEntry &entry, bool &is_dff) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (size_t i = 0; i < vehicles_.size(); i++) {
+        if (vehicles_[i].dff == name) {
+            entry = vehicles_[i];
+            is_dff = true;
+            return true;
+        }
+        if (vehicles_[i].txd == name) {
+            entry = vehicles_[i];
+            is_dff = false;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool Registry::set_player_skin(int playerid, int skinid) {
     if (playerid < 0 || playerid >= kMaxPlayers) return false;
     std::lock_guard<std::mutex> lock(mutex_);
@@ -340,6 +451,33 @@ std::string build_manifest_json(const std::vector<SkinEntry> &skins) {
                  (unsigned)skins[i].txd_crc32,
                  (unsigned)skins[i].dff_size,
                  (unsigned)skins[i].txd_size);
+        out += buf;
+    }
+    out += "]";
+    return out;
+}
+
+std::string build_vehicles_json(const std::vector<VehicleEntry> &vehicles) {
+    std::string out = "[";
+    for (size_t i = 0; i < vehicles.size(); i++) {
+        if (i > 0) out += ",";
+        char buf[512];
+        // CRC32 as UNSIGNED DECIMAL (same contract as the skin manifest).
+        // Handling numbers with %g (0 = stock, left unset client-side).
+        snprintf(buf, sizeof(buf),
+                 "{\"vehid\":%d,\"dff\":\"%s\",\"txd\":\"%s\","
+                 "\"dff_crc32\":%u,\"txd_crc32\":%u,"
+                 "\"dff_size\":%u,\"txd_size\":%u,"
+                 "\"maxspeed\":%g,\"accel\":%g,\"brake\":%g}",
+                 vehicles[i].vehid,
+                 json_escape(vehicles[i].dff).c_str(),
+                 json_escape(vehicles[i].txd).c_str(),
+                 (unsigned)vehicles[i].dff_crc32,
+                 (unsigned)vehicles[i].txd_crc32,
+                 (unsigned)vehicles[i].dff_size,
+                 (unsigned)vehicles[i].txd_size,
+                 (double)vehicles[i].maxspeed, (double)vehicles[i].accel,
+                 (double)vehicles[i].brake);
         out += buf;
     }
     out += "]";

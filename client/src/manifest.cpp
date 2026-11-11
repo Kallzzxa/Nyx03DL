@@ -39,6 +39,32 @@ class Parser {
         return true;
     }
 
+    // v1.3.0: parse a vehicles array (GET /nyx03dl/vehicles). Same
+    // envelope as the skin manifest, different object schema.
+    bool ParseVehicles(std::vector<VehicleModel>& out) {
+        SkipWs();
+        if (!Consume('[')) return Fail("expected '[' at start of vehicles");
+        SkipWs();
+        std::vector<VehicleModel> models;
+        if (Peek() == ']') {
+            pos_++;
+        } else {
+            for (;;) {
+                VehicleModel m;
+                if (!ParseVehicleObject(m)) return false;
+                models.push_back(m);
+                SkipWs();
+                if (Consume(',')) continue;
+                if (Consume(']')) break;
+                return Fail("expected ',' or ']' in vehicles array");
+            }
+        }
+        SkipWs();
+        if (pos_ != text_.size()) return Fail("trailing data after vehicles array");
+        out.swap(models);
+        return true;
+    }
+
    private:
     const std::string& text_;
     std::string& err_;
@@ -141,6 +167,39 @@ class Parser {
         return true;
     }
 
+    // Parse a non-negative JSON number with an optional fraction
+    // (e.g. 0, 220, 2.5). No exponent: the server emits handling numbers
+    // with %g, which never uses exponents in the 0-500 range. Rejects
+    // negatives and absurd magnitudes.
+    bool ParseFloat(float& out) {
+        SkipWs();
+        if (Peek() == '-') return Fail("negative number where unsigned expected");
+        if (!std::isdigit(static_cast<unsigned char>(Peek())))
+            return Fail("expected number");
+        double v = 0;
+        while (pos_ < text_.size() &&
+               std::isdigit(static_cast<unsigned char>(text_[pos_]))) {
+            v = v * 10 + (text_[pos_] - '0');
+            if (v > 100000) return Fail("number exceeds sane range");
+            pos_++;
+        }
+        if (Peek() == '.') {
+            pos_++;
+            if (!std::isdigit(static_cast<unsigned char>(Peek())))
+                return Fail("expected digit after decimal point");
+            double frac = 0, div = 1;
+            while (pos_ < text_.size() &&
+                   std::isdigit(static_cast<unsigned char>(text_[pos_]))) {
+                frac = frac * 10 + (text_[pos_] - '0');
+                div *= 10;
+                pos_++;
+            }
+            v += frac / div;
+        }
+        out = static_cast<float>(v);
+        return true;
+    }
+
     bool ParseObject(ManifestModel& m) {
         if (!Expect('{', "'{'")) return false;
         bool seenSkin = false, seenBase = false, seenDff = false, seenTxd = false;
@@ -213,6 +272,84 @@ class Parser {
             return Fail("zero file size in manifest");
         return true;
     }
+
+    // v1.3.0: one vehicle object. Required: vehid, dff, txd, both
+    // CRCs, both sizes. Optional (default 0 = stock): maxspeed, accel,
+    // brake. Same filename/CRC/size rules as skins; vehid 400-611.
+    bool ParseVehicleObject(VehicleModel& m) {
+        if (!Expect('{', "'{'")) return false;
+        bool seenVeh = false, seenDff = false, seenTxd = false;
+        bool seenDffCrc = false, seenTxdCrc = false, seenDffSize = false,
+             seenTxdSize = false;
+        SkipWs();
+        if (Peek() == '}') {
+            pos_++;
+            return Fail("empty vehicle object (all fields are required)");
+        }
+        for (;;) {
+            std::string key;
+            if (!ParseString(key)) return false;
+            if (!Expect(':', "':' after object key")) return false;
+            if (key == "vehid") {
+                uint32_t v;
+                if (!ParseUint32(v)) return false;
+                m.vehid = static_cast<int>(v);
+                seenVeh = true;
+            } else if (key == "dff") {
+                if (!ParseString(m.dff)) return false;
+                seenDff = true;
+            } else if (key == "txd") {
+                if (!ParseString(m.txd)) return false;
+                seenTxd = true;
+            } else if (key == "dff_crc32") {
+                if (!ParseUint32(m.dffCrc)) return false;
+                seenDffCrc = true;
+            } else if (key == "txd_crc32") {
+                if (!ParseUint32(m.txdCrc)) return false;
+                seenTxdCrc = true;
+            } else if (key == "dff_size") {
+                if (!ParseUint32(m.dffSize)) return false;
+                seenDffSize = true;
+            } else if (key == "txd_size") {
+                if (!ParseUint32(m.txdSize)) return false;
+                seenTxdSize = true;
+            } else if (key == "maxspeed") {
+                if (!ParseFloat(m.maxspeed)) return false;
+            } else if (key == "accel") {
+                if (!ParseFloat(m.accel)) return false;
+            } else if (key == "brake") {
+                if (!ParseFloat(m.brake)) return false;
+            } else {
+                return Fail("unknown key in vehicle object: " + key);
+            }
+            SkipWs();
+            if (Consume(',')) continue;
+            if (Consume('}')) break;
+            return Fail("expected ',' or '}' in vehicle object");
+        }
+        if (!seenVeh || !seenDff || !seenTxd || !seenDffCrc || !seenTxdCrc ||
+            !seenDffSize || !seenTxdSize)
+            return Fail("vehicle object is missing a required field");
+        if (m.vehid < 400 || m.vehid > 611)
+            return Fail("vehid outside 400-611");
+        if (m.dff.empty() || m.txd.empty())
+            return Fail("empty dff/txd file name");
+        if (m.dff.find('/') != std::string::npos ||
+            m.dff.find('\\') != std::string::npos ||
+            m.dff.find("..") != std::string::npos ||
+            m.txd.find('/') != std::string::npos ||
+            m.txd.find('\\') != std::string::npos ||
+            m.txd.find("..") != std::string::npos)
+            return Fail("dff/txd file name contains path characters");
+        if (m.dffCrc == 0 || m.txdCrc == 0)
+            return Fail("zero CRC32 in vehicles");
+        if (m.dffSize == 0 || m.txdSize == 0)
+            return Fail("zero file size in vehicles");
+        if (m.maxspeed < 0 || m.maxspeed > 500 || m.accel < 0 ||
+            m.accel > 50 || m.brake < 0 || m.brake > 50)
+            return Fail("handling value out of range");
+        return true;
+    }
 };
 
 }  // namespace
@@ -222,6 +359,13 @@ bool ParseManifest(const std::string& json, std::vector<ManifestModel>& out,
     err.clear();
     Parser p(json, err);
     return p.Parse(out);
+}
+
+bool ParseVehicles(const std::string& json, std::vector<VehicleModel>& out,
+                   std::string& err) {
+    err.clear();
+    Parser p(json, err);
+    return p.ParseVehicles(out);
 }
 
 }  // namespace nyx

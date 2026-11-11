@@ -34,10 +34,32 @@ struct ManifestModel {
     uint32_t txdSize = 0;
 };
 
+// v1.3.0: one replaced vehicle model, from GET /nyx03dl/vehicles.
+// Same file/CRC contract as skins; handling numbers are JSON numbers
+// (0 = stock, left unset). vehid is both the replaced model id and the
+// key the client uses for downloads.
+struct VehicleModel {
+    int vehid = 0;    // 400..611
+    std::string dff;
+    std::string txd;
+    uint32_t dffCrc = 0;
+    uint32_t txdCrc = 0;
+    uint32_t dffSize = 0;
+    uint32_t txdSize = 0;
+    float maxspeed = 0;  // km/h, handling.cfg units (0 = stock)
+    float accel = 0;     // engine acceleration, cfg units (0 = stock)
+    float brake = 0;     // brake deceleration, cfg units (0 = stock)
+};
+
 // Parse a manifest JSON document. Returns false (and fills `err` with a
 // human-readable reason) on any malformed input. `out` is left untouched
 // on failure and fully replaced on success.
 bool ParseManifest(const std::string& json, std::vector<ManifestModel>& out,
+                   std::string& err);
+
+// v1.3.0: parse a vehicles JSON document (same rules as ParseManifest,
+// plus the optional handling numbers). `out` untouched on failure.
+bool ParseVehicles(const std::string& json, std::vector<VehicleModel>& out,
                    std::string& err);
 
 }  // namespace nyx

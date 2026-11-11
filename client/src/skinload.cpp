@@ -119,6 +119,12 @@ void FreeAll() {
 
 void FreeUnassigned() {
     for (auto it = g_entries.begin(); it != g_entries.end();) {
+        // v1.3.0: replaced vehicles are never "unassigned" — their
+        // templates stay swapped until disconnect / server change.
+        if (nyx::GlobalState().IsVehicle(it->skinid)) {
+            ++it;
+            continue;
+        }
         if (nyx::GlobalState().IsCustomAssigned(it->skinid)) {
             ++it;
             continue;

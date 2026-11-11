@@ -24,8 +24,8 @@ namespace nyx {
 
 // One model, as known to the client after a successful manifest probe.
 struct Model {
-    int skinid = 0;   // 20000..30000
-    int baseid = 0;   // 0..311, base ped whose template M3 will swap
+    int skinid = 0;   // skins: 20000..30000; vehicles: vehid 400..611
+    int baseid = 0;   // skins: 0..311; vehicles: same as skinid (replaces itself)
     uint32_t dffCrc = 0;
     uint32_t txdCrc = 0;
     uint32_t dffSize = 0;
@@ -36,6 +36,13 @@ struct Model {
     std::string txdPath;  // absolute cache path
     bool dffReady = false;  // cache file exists AND its CRC32 matches
     bool txdReady = false;
+    // v1.3.0: vehicle replacement (from /nyx03dl/vehicles). A vehicle
+    // model is swapped whenever it is loaded — no player mapping gates
+    // it, unlike skins. Handling values are 0 when unset (= stock).
+    bool isVehicle = false;
+    float maxspeed = 0;  // km/h, handling.cfg units (0 = stock)
+    float accel = 0;     // engine acceleration, cfg units (0 = stock)
+    float brake = 0;     // brake deceleration, cfg units (0 = stock)
 };
 
 // Thread-safe holder for "what server are we on, what models does it have,
@@ -46,6 +53,13 @@ class NyxState {
     // are computed from the cache on the spot. `serverKey` is "ip:gameport".
     void SetManifest(const std::vector<Model>& models, const std::string& serverKey,
                      uint16_t httpPort);
+
+    // v1.3.0: replace the VEHICLE entries in the model list with a
+    // freshly probed /vehicles list (skin entries are kept untouched).
+    // Ready flags are computed from the cache on the spot, like
+    // SetManifest. Call only while on a Nyx server (same conditions as
+    // the manifest probe).
+    void SetVehicles(const std::vector<Model>& vehicles);
 
     // Forget everything about the current server (disconnect / server
     // change). Cache FILES are deliberately kept on disk.
@@ -95,6 +109,11 @@ class NyxState {
     // renderer only swaps bases a player wears (prevents bleed onto
     // same-base peds) and restores bases nobody wears anymore.
     bool IsCustomAssigned(int skinid) const;
+
+    // v1.3.0: true iff `skinid` is a replaced vehicle model (400-611
+    // with isVehicle set). Vehicle templates swap unconditionally
+    // once loaded — no player mapping gates them.
+    bool IsVehicle(int skinid) const;
 
     // Forget the player->skin mapping (disconnect / server change).
     void ClearPlayerSkins();

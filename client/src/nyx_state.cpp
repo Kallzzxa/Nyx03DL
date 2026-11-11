@@ -10,10 +10,32 @@ namespace nyx {
 void NyxState::SetManifest(const std::vector<Model>& models,
                            const std::string& serverKey, uint16_t httpPort) {
     std::lock_guard<std::mutex> lk(mtx_);
+    // v1.3.0: the manifest carries skins only; keep any vehicle entries
+    // already in the list (SetVehicles owns them).
+    std::vector<Model> kept;
+    for (const auto& m : models_)
+        if (m.isVehicle) kept.push_back(m);
     models_ = models;
+    for (const auto& m : kept) models_.push_back(m);
     serverKey_ = serverKey;
     httpPort_ = httpPort;
     for (auto& m : models_) {
+        m.dffPath = cache::PathFor(m.dffCrc, true);
+        m.txdPath = cache::PathFor(m.txdCrc, false);
+        m.dffReady = cache::HasValid(m.dffCrc, true);
+        m.txdReady = cache::HasValid(m.txdCrc, false);
+    }
+}
+
+void NyxState::SetVehicles(const std::vector<Model>& vehicles) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    std::vector<Model> kept;
+    for (const auto& m : models_)
+        if (!m.isVehicle) kept.push_back(m);
+    models_ = kept;
+    for (const auto& v : vehicles) models_.push_back(v);
+    for (auto& m : models_) {
+        if (!m.isVehicle) continue;
         m.dffPath = cache::PathFor(m.dffCrc, true);
         m.txdPath = cache::PathFor(m.txdCrc, false);
         m.dffReady = cache::HasValid(m.dffCrc, true);
@@ -103,6 +125,13 @@ bool NyxState::IsCustomAssigned(int skinid) const {
     std::lock_guard<std::mutex> lk(mtx_);
     for (const auto& kv : playerSkins_)
         if (kv.second == skinid) return true;
+    return false;
+}
+
+bool NyxState::IsVehicle(int skinid) const {
+    std::lock_guard<std::mutex> lk(mtx_);
+    for (const auto& m : models_)
+        if (m.skinid == skinid && m.isVehicle) return true;
     return false;
 }
 

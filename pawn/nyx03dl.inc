@@ -39,6 +39,12 @@
 // terdaftar (lihat SetCostumNyx03DL dan Nyx_GetBaseSkin).
 #define NYX_INVALID_BASE (-1)
 
+// Range model kendaraan GTA SA yang bisa di-replace (v1.3.0).
+// 400 = Landstalker, 411 = Infernus, 451 = Turismo, dst. — lihat
+// daftar lengkap ID kendaraan di wiki SA-MP (vehicleid 400-611).
+#define NYX_MIN_VEHID (400)
+#define NYX_MAX_VEHID (611)
+
 // ---------------------------------------------------------------------------
 // Native plugin (di-export oleh nyx03dl.dll — JANGAN ubah tandatangannya)
 // ---------------------------------------------------------------------------
@@ -130,3 +136,65 @@ native Nyx_GetBaseSkin(skinid);
 //       SendClientMessage(playerid, -1, "Pasang nyx03dl.asi dulu, reconnect, tunggu download selesai.");
 //   }
 native Nyx_HasClient(playerid);
+
+// ---------------------------------------------------------------------------
+// Kendaraan custom — replace model (v1.3.0)
+// ---------------------------------------------------------------------------
+
+// Ganti satu model kendaraan GTA (400-611) dengan .dff/.txd custom
+// untuk semua pemain yang memakai client .asi Nyx03DL.
+//
+//   vehid : ID model kendaraan, harus 400-611 (mis. 400 Landstalker,
+//           411 Infernus, 451 Turismo).
+//   dff[] : nama file .dff, mis. "veh400.dff".
+//   txd[] : nama file .txd, mis. "veh400.txd".
+//           Kedua file HARUS sudah ada di scriptfiles/nyx03dl/.
+//
+// Return : 1 kalau sukses, 0 kalau gagal (file tidak ada / vehid di
+//          luar 400-611 / nama file tidak valid).
+//
+// CARA KERJA: modelnya TETAP pakai ID yang sama — spawn kendaraan
+// dengan CreateVehicle(vehid, ...) seperti biasa. Client yang pakai
+// .asi akan me-render model custom (dan handling custom kalau diatur
+// lewat NyxSetVehHandling); client tanpa .asi melihat model bawaan.
+// Daftarkan SEBELUM pemain connect, dan spawn kendaraan SETELAH
+// download .asi selesai (cek Nyx_HasClient) supaya model custom-nya
+// langsung tampil — kendaraan yang sudah terlanjur muncul sebagai
+// model bawaan baru berubah setelah re-stream (keluar-masuk jarak
+// pandang) atau di-spawn ulang.
+//
+// Idempotent: daftar ulang vehid yang sama dengan file yang sama
+// -> refresh CRC/ukuran. File berbeda -> entry diperbarui di tempat
+// (handling yang sudah diatur dipertahankan).
+//
+// Contoh:
+//   if (!NyxReplaceVeh(400, "veh400.dff", "veh400.txd"))
+//   {
+//       print("[nyx03dl] GAGAL replace kendaraan 400!");
+//   }
+native NyxReplaceVeh(vehid, dff[], txd[]);
+
+// Atur handling untuk kendaraan yang sudah di-replace (v1.3.0).
+//
+//   vehid    : ID model kendaraan (400-611) yang SUDAH didaftarkan
+//              lewat NyxReplaceVeh.
+//   maxspeed : kecepatan maksimum, km/jam satuan handling.cfg
+//              (mis. 220.0). 0.0 = biarkan bawaan.
+//   accel    : akselerasi mesin, satuan handling.cfg (mis. 2.0).
+//              0.0 = biarkan bawaan.
+//   brake    : deselerasi rem, satuan handling.cfg (mis. 3.0).
+//              0.0 = biarkan bawaan.
+//
+// Return : 1 kalau sukses, 0 kalau kendaraan belum terdaftar atau
+//          ada nilai yang tidak valid (negatif / terlalu besar).
+//
+// CATATAN: handling di-apply client-side oleh .asi (patch data
+// handling di memori GTA). Nilai maxspeed dikonversi .asi ke satuan
+// dunia game (handling.cfg ~2x nilai di memori); accel/brake ditulis
+// apa adanya. Kalau di game terasa terlalu pelan/kencang dibanding
+// angka yang dimasukkan, sesuaikan angkanya — mekanismenya sudah
+// benar, tinggal tuning.
+//
+// Contoh:
+//   NyxSetVehHandling(400, 220.0, 2.0, 3.0);
+native NyxSetVehHandling(vehid, Float:maxspeed, Float:accel, Float:brake);

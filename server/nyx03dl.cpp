@@ -217,11 +217,75 @@ static cell AMX_NATIVE_CALL n_Nyx_HasClient(AMX *amx, const cell *params) {
     return asi_seen_recent(ip) ? 1 : 0;
 }
 
+// native NyxReplaceVeh(vehid, dff[], txd[]) — v1.3.0. Replace one GTA
+// vehicle model (400-611) with a custom .dff/.txd for every client
+// with the .asi. Returns 1 on success, 0 on failure (file missing,
+// vehid outside 400-611, bad filename). The model keeps its own id:
+// spawn it with the normal CreateVehicle(vehid, ...) — clients with
+// the .asi see the custom model, stock clients see the base model.
+static cell AMX_NATIVE_CALL n_NyxReplaceVeh(AMX *amx, const cell *params) {
+    if (params[0] < 3 * (cell)sizeof(cell)) return 0;
+    int vehid = (int)params[1];
+    std::string dff, txd;
+    if (!amx_string_param(amx, params[2], dff) ||
+        !amx_string_param(amx, params[3], txd))
+        return 0;
+    std::string error;
+    if (!g_registry.register_vehicle(vehid, dff, txd, nyx::kModelDir,
+                                     error)) {
+        sampgdk::logprintf("[nyx03dl] NyxReplaceVeh(%d, \"%s\", \"%s\") "
+                           "FAILED: %s",
+                           vehid, dff.c_str(), txd.c_str(), error.c_str());
+        return 0;
+    }
+    nyx::VehicleEntry e;
+    bool is_dff = false;
+    g_registry.find_vehicle_file(dff, e, is_dff);
+    sampgdk::logprintf("[nyx03dl] vehicle %d replaced: "
+                       "dff \"%s\" crc %u size %u, txd \"%s\" crc %u size %u",
+                       vehid, e.dff.c_str(), (unsigned)e.dff_crc32,
+                       (unsigned)e.dff_size, e.txd.c_str(),
+                       (unsigned)e.txd_crc32, (unsigned)e.txd_size);
+    return 1;
+}
+
+// native NyxSetVehHandling(vehid, Float:maxspeed, Float:accel,
+// Float:brake) — v1.3.0. Tune the handling of a replaced vehicle.
+// Each value is 0 to leave that field stock (handling.cfg value).
+// maxspeed is km/h in handling.cfg units; accel/brake are cfg units.
+// Returns 1 on success, 0 when the vehicle is not registered or a
+// value is invalid. The .asi applies it client-side by patching the
+// in-memory handling data (see client game/handling.cpp).
+static cell AMX_NATIVE_CALL n_NyxSetVehHandling(AMX *amx, const cell *params) {
+    (void)amx;
+    if (params[0] < 4 * (cell)sizeof(cell)) return 0;
+    int vehid = (int)params[1];
+    float maxspeed = amx_ctof(params[2]);
+    float accel = amx_ctof(params[3]);
+    float brake = amx_ctof(params[4]);
+    std::string error;
+    if (!g_registry.set_vehicle_handling(vehid, maxspeed, accel, brake,
+                                         error)) {
+        sampgdk::logprintf("[nyx03dl] NyxSetVehHandling(%d, %g, %g, %g) "
+                           "FAILED: %s",
+                           vehid, (double)maxspeed, (double)accel,
+                           (double)brake, error.c_str());
+        return 0;
+    }
+    sampgdk::logprintf("[nyx03dl] vehicle %d handling: maxspeed %g, "
+                       "accel %g, brake %g",
+                       vehid, (double)maxspeed, (double)accel,
+                       (double)brake);
+    return 1;
+}
+
 static AMX_NATIVE_INFO g_natives[] = {
     {"SetCostumNyx03DL", n_SetCostumNyx03DL},
     {"Nyx_SetPlayerSkin", n_Nyx_SetPlayerSkin},
     {"Nyx_GetBaseSkin", n_Nyx_GetBaseSkin},
     {"Nyx_HasClient", n_Nyx_HasClient},
+    {"NyxReplaceVeh", n_NyxReplaceVeh},
+    {"NyxSetVehHandling", n_NyxSetVehHandling},
     {nullptr, nullptr},
 };
 
@@ -318,6 +382,13 @@ static void handle_http_client(SOCKET client) {
                       nyx::build_players_json(g_registry.snapshot_players()));
         return;
     }
+    if (path == "/nyx03dl/vehicles") {
+        // v1.3.0: vehicle replacement manifest (separate endpoint so
+        // the skin manifest stays byte-identical for old clients).
+        send_response(client, 200, "OK", "application/json",
+                      nyx::build_vehicles_json(g_registry.snapshot_vehicles()));
+        return;
+    }
     const std::string file_prefix = "/nyx03dl/file/";
     if (path.compare(0, file_prefix.size(), file_prefix) == 0) {
         std::string name = path.substr(file_prefix.size());
@@ -334,6 +405,41 @@ static void handle_http_client(SOCKET client) {
         nyx::SkinEntry entry;
         bool is_dff = false;
         if (!g_registry.find_file(name, entry, is_dff)) {
+            // v1.3.0: the file may belong to a replaced vehicle instead.
+            nyx::VehicleEntry vent;
+            if (g_registry.find_vehicle_file(name, vent, is_dff)) {
+                std::string vfull = std::string(nyx::kModelDir) + name;
+                FILE *vf = fopen(vfull.c_str(), "rb");
+                if (vf != nullptr) {
+                    fseek(vf, 0, SEEK_END);
+                    long vsize = ftell(vf);
+                    fseek(vf, 0, SEEK_SET);
+                    if (vsize < 0) vsize = 0;
+                    char vheader[512];
+                    snprintf(vheader, sizeof(vheader),
+                             "HTTP/1.0 200 OK\r\n"
+                             "Content-Type: application/octet-stream\r\n"
+                             "Content-Length: %ld\r\n"
+                             "Connection: close\r\n\r\n",
+                             vsize);
+                    bool vok = send_all(client, vheader, strlen(vheader));
+                    char vchunk[8192];
+                    size_t vn;
+                    while (vok && (vn = fread(vchunk, 1, sizeof(vchunk), vf)) > 0)
+                        vok = send_all(client, vchunk, vn);
+                    if (!vok)
+                        sampgdk::logprintf("[nyx03dl] HTTP send failed for \"%s\"",
+                                           name.c_str());
+                    fclose(vf);
+                    return;
+                }
+                sampgdk::logprintf("[nyx03dl] HTTP 404 file \"%s\" (gone from "
+                                   "disk)",
+                                   name.c_str());
+                send_response(client, 404, "Not Found", "text/plain",
+                              "file not found");
+                return;
+            }
             sampgdk::logprintf("[nyx03dl] HTTP 404 file \"%s\" (not "
                                "registered)",
                                name.c_str());

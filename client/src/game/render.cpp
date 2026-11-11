@@ -20,6 +20,7 @@
 #include "game/render.h"
 
 #include "game/gta.h"
+#include "game/handling.h"
 #include "game/rwmodel.h"
 #include "chatui.h"
 #include "log.h"
@@ -98,9 +99,11 @@ void RestoreBase(int baseId) {
     g_swapped.erase(it);
 }
 
-// Point a base template at a custom clump, only if a player wears it
-// (limits bleed onto same-base peds). The base's own clump is saved once
-// so RestoreAll / RestoreBase can put it back.
+// Point a base template at a custom clump. Skins swap only if a player
+// wears them (limits bleed onto same-base peds); v1.3.0 vehicle
+// replacements swap unconditionally once loaded (no player mapping
+// gates them). The base's own clump is saved once so RestoreAll /
+// RestoreBase can put it back.
 void SwapOne(int skinid, int baseid, void* clump) {
     void* mi = ModelInfo(baseid);
     if (!mi) return;  // base model slot empty
@@ -129,7 +132,11 @@ void SwapOne(int skinid, int baseid, void* clump) {
         return;
     }
 
-    if (!nyx::GlobalState().IsCustomAssigned(skinid)) return;  // loaded, unworn
+    // v1.3.0: vehicle replacements swap unconditionally once loaded;
+    // skins still need a wearer.
+    if (!nyx::GlobalState().IsVehicle(skinid) &&
+        !nyx::GlobalState().IsCustomAssigned(skinid))
+        return;  // loaded, unworn
     if (*field == clump) return;  // already ours but unrecorded (rare) — leave it
 
     g_swapped[baseid] = {*field, clump, skinid};  // remember the game's own clump once
@@ -232,20 +239,34 @@ void Tick() {
         NYX_LOGI("render: restore requested (disconnect/server change)");
         RestoreAll();
         skinload::FreeAll();
+        handling::RestoreAll();  // v1.3.0: stock handling back, too
         // v1.2.4: a new server means a new mapping — drop queued rebuilds
         // and the last-seen snapshot with it.
         g_rebuildPending.clear();
         g_lastSkins.clear();
     }
 
-    // Lazy-load + swap every skin a player currently wears.
+    // Lazy-load + swap every skin a player currently wears, plus every
+    // replaced vehicle (vehicles are always "worn" — no player gate).
     std::vector<nyx::Model> models = nyx::GlobalState().Models();
     for (const auto& m : models) {
         if (!m.dffReady || !m.txdReady) continue;
-        if (!nyx::GlobalState().IsCustomAssigned(m.skinid)) continue;
+        if (!m.isVehicle && !nyx::GlobalState().IsCustomAssigned(m.skinid))
+            continue;
         if (!skinload::EnsureLoaded(m)) continue;
     }
     skinload::ForEachReady(&SwapReadySkin, nullptr);
+
+    // v1.3.0: apply handling for replaced vehicles (game thread).
+    // ModelInfo(m.baseid) is the CVehicleModelInfo for the model
+    // (baseid == vehid for vehicles). Runs after the swap pass so the
+    // handling patch and the template swap land in the same frame.
+    for (const auto& m : models) {
+        if (!m.isVehicle) continue;
+        if (!m.dffReady || !m.txdReady) continue;
+        handling::Apply(m.skinid, ModelInfo(m.baseid), m.maxspeed, m.accel,
+                        m.brake);
+    }
 
     // v1.2.4: notice when the LOCAL player's custom skin newly appears
     // or changes, and queue a one-time ped rebuild for it.
@@ -315,10 +336,13 @@ void Tick() {
     // Restore bases whose skin is no longer worn by ANY player (player
     // changed skin, disconnected, or the skin left the manifest). Without
     // this the custom clump would keep bleeding onto same-base peds.
+    // v1.3.0: vehicle replacements are never "stale" — their templates
+    // stay swapped until disconnect / server change.
     {
         std::vector<int> stale;
         for (const auto& kv : g_swapped)
-            if (!nyx::GlobalState().IsCustomAssigned(kv.second.customId))
+            if (!nyx::GlobalState().IsVehicle(kv.second.customId) &&
+                !nyx::GlobalState().IsCustomAssigned(kv.second.customId))
                 stale.push_back(kv.first);
         for (int base : stale) RestoreBase(base);
     }
